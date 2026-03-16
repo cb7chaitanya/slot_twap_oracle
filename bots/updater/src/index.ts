@@ -54,7 +54,9 @@ async function retryWithBackoff<T>(fn: () => Promise<T>): Promise<T> {
 
 async function tick(): Promise<void> {
   try {
-    const price = await fetchRaydiumPrice(connection, RAYDIUM_AMM_ID);
+    const price = await retryWithBackoff(() =>
+      fetchRaydiumPrice(connection, RAYDIUM_AMM_ID)
+    );
     console.log(
       `[updater] Fetched price: ${price} (${Number(price) / 10 ** PRICE_DECIMALS} scaled)`
     );
