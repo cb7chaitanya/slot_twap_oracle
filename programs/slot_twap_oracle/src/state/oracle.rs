@@ -9,5 +9,4 @@ pub struct Oracle {
     pub last_price: u128,
     pub cumulative_price: u128,
     pub last_slot: u64,
-    pub bump: u8,
 }

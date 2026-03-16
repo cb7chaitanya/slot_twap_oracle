@@ -49,7 +49,6 @@ pub fn handler(
     oracle.last_price = 0;
     oracle.cumulative_price = 0;
     oracle.last_slot = clock.slot;
-    oracle.bump = ctx.bumps.oracle;
 
     let buffer = &mut ctx.accounts.observation_buffer;
     buffer.oracle = oracle.key();
