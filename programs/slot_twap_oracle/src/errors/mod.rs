@@ -8,12 +8,9 @@ pub enum OracleError {
     #[msg("Stale oracle update — slot has not advanced")]
     StaleSlot,
 
-    #[msg("Not enough observations to compute SWAP for the requested window")]
-    InsufficientObservations,
+    #[msg("Not enough observations to compute swap for requested window")]
+    InsufficientHistory,
 
     #[msg("Observation buffer capacity must be greater than zero")]
     InvalidCapacity,
-
-    #[msg("Not enough observations to compute swap for requested window")]
-    InsufficientHistory,
 }

@@ -24,7 +24,7 @@ pub fn handler(ctx: Context<GetSwap>, window_slots: u64) -> Result<u128> {
     let current_slot = clock.slot;
 
     let len = buffer.observations.len();
-    require!(len > 0, OracleError::InsufficientObservations);
+    require!(len > 0, OracleError::InsufficientHistory);
 
     // The cumulative_price on the oracle may have advanced beyond the last
     // stored observation if slots have elapsed since the last update_price.
