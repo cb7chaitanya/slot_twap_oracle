@@ -16,6 +16,8 @@ mod tests {
     use solana_sdk::instruction::InstructionError;
     use solana_sdk::transaction::TransactionError;
 
+    use solana_sdk::program_pack::Pack;
+
     use slot_twap_oracle::errors::OracleError;
     use slot_twap_oracle::math::compute_swap;
     use slot_twap_oracle::state::{ObservationBuffer, Oracle};
@@ -40,10 +42,42 @@ mod tests {
     }
 
     fn setup() -> LiteSVM {
-        let mut svm = LiteSVM::new();
+        let mut svm = LiteSVM::new().with_spl_programs();
         svm.add_program_from_file(program_id(), "../target/deploy/slot_twap_oracle.so")
             .expect("Failed to load program");
         svm
+    }
+
+    /// Create a Token-2022 mint account and return its pubkey
+    fn create_mint(svm: &mut LiteSVM, payer: &Keypair) -> Pubkey {
+        let mint = Keypair::new();
+        let rent = svm.minimum_balance_for_rent_exemption(spl_token_2022::state::Mint::LEN);
+
+        let create_account_ix = solana_sdk::system_instruction::create_account(
+            &payer.pubkey(),
+            &mint.pubkey(),
+            rent,
+            spl_token_2022::state::Mint::LEN as u64,
+            &spl_token_2022::id(),
+        );
+        let init_mint_ix = spl_token_2022::instruction::initialize_mint2(
+            &spl_token_2022::id(),
+            &mint.pubkey(),
+            &payer.pubkey(),
+            None,
+            6,
+        )
+        .unwrap();
+
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[create_account_ix, init_mint_ix],
+            Some(&payer.pubkey()),
+            &[payer, &mint],
+            blockhash,
+        );
+        svm.send_transaction(tx).expect("Failed to create mint");
+        mint.pubkey()
     }
 
     fn build_initialize_ix(
@@ -56,8 +90,6 @@ mod tests {
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
 
         let data = slot_twap_oracle::instruction::InitializeOracle {
-            base_mint: *base_mint,
-            quote_mint: *quote_mint,
             capacity,
         }
         .data();
@@ -67,6 +99,8 @@ mod tests {
             accounts: vec![
                 AccountMeta::new(oracle_pda, false),
                 AccountMeta::new(obs_pda, false),
+                AccountMeta::new_readonly(*base_mint, false),
+                AccountMeta::new_readonly(*quote_mint, false),
                 AccountMeta::new(*authority, true),
                 AccountMeta::new_readonly(system_program::id(), false),
             ],
@@ -200,8 +234,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, _) = init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
         let oracle = deserialize_oracle(&svm, &oracle_pda);
@@ -224,8 +258,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -250,8 +284,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -288,8 +322,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -316,8 +350,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let capacity = 3u32;
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, capacity);
@@ -351,8 +385,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -408,8 +442,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -439,8 +473,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -477,8 +511,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -515,8 +549,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -541,8 +575,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, _init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -561,8 +595,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -587,8 +621,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -616,8 +650,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
 
         // Warp to a known slot so init is deterministic
         svm.warp_to_slot(50);
@@ -652,8 +686,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
 
         // Initialize at slot 90 so last_slot = 90
         svm.warp_to_slot(90);
@@ -703,8 +737,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
 
         // Initialize at slot 90
         svm.warp_to_slot(90);
@@ -762,8 +796,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
         // Second init with same mints should fail (PDA already exists)
@@ -777,8 +811,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
 
         let ix = build_initialize_ix(&payer.pubkey(), &base_mint, &quote_mint, 0);
         send_tx_expect_err(&mut svm, &payer, &[ix]);
@@ -790,9 +824,9 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let mint_a = Pubkey::new_unique();
-        let mint_b = Pubkey::new_unique();
-        let mint_c = Pubkey::new_unique();
+        let mint_a = create_mint(&mut svm, &payer);
+        let mint_b = create_mint(&mut svm, &payer);
+        let mint_c = create_mint(&mut svm, &payer);
 
         let (oracle_ab, init_slot_ab) =
             init_oracle(&mut svm, &payer, &mint_a, &mint_b, DEFAULT_CAPACITY);
@@ -814,8 +848,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -834,8 +868,8 @@ mod tests {
         svm.airdrop(&authority.pubkey(), 10_000_000_000).unwrap();
         svm.airdrop(&attacker.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &authority);
+        let quote_mint = create_mint(&mut svm, &authority);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &authority, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -870,8 +904,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -897,8 +931,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -923,8 +957,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -945,8 +979,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, 1);
 
@@ -972,8 +1006,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, 3);
 
@@ -1012,8 +1046,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -1039,8 +1073,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -1064,8 +1098,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -1090,8 +1124,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, 3);
 
@@ -1130,8 +1164,8 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = Pubkey::new_unique();
-        let quote_mint = Pubkey::new_unique();
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
@@ -1186,10 +1220,10 @@ mod tests {
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
         // Mint stand-ins for SOL, ETH, BTC, USDC
-        let sol_mint = Pubkey::new_unique();
-        let eth_mint = Pubkey::new_unique();
-        let btc_mint = Pubkey::new_unique();
-        let usdc_mint = Pubkey::new_unique();
+        let sol_mint = create_mint(&mut svm, &payer);
+        let eth_mint = create_mint(&mut svm, &payer);
+        let btc_mint = create_mint(&mut svm, &payer);
+        let usdc_mint = create_mint(&mut svm, &payer);
 
         // Initialize all three pairs
         let (sol_oracle, _) =
@@ -1259,10 +1293,10 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let sol_mint = Pubkey::new_unique();
-        let eth_mint = Pubkey::new_unique();
-        let btc_mint = Pubkey::new_unique();
-        let usdc_mint = Pubkey::new_unique();
+        let sol_mint = create_mint(&mut svm, &payer);
+        let eth_mint = create_mint(&mut svm, &payer);
+        let btc_mint = create_mint(&mut svm, &payer);
+        let usdc_mint = create_mint(&mut svm, &payer);
 
         let (sol_oracle, _) =
             init_oracle(&mut svm, &payer, &sol_mint, &usdc_mint, DEFAULT_CAPACITY);
@@ -1330,9 +1364,9 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
 
-        let sol_mint = Pubkey::new_unique();
-        let eth_mint = Pubkey::new_unique();
-        let usdc_mint = Pubkey::new_unique();
+        let sol_mint = create_mint(&mut svm, &payer);
+        let eth_mint = create_mint(&mut svm, &payer);
+        let usdc_mint = create_mint(&mut svm, &payer);
 
         let (sol_oracle, init_slot) =
             init_oracle(&mut svm, &payer, &sol_mint, &usdc_mint, DEFAULT_CAPACITY);
@@ -1415,7 +1449,7 @@ mod tests {
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 100_000_000_000).unwrap(); // 100 SOL for rent
 
-        let quote_mint = Pubkey::new_unique(); // shared quote (e.g. USDC)
+        let quote_mint = create_mint(&mut svm, &payer); // shared quote (e.g. USDC)
 
         // Generate 50 unique base mints and initialize their oracles
         let mut base_mints = Vec::with_capacity(NUM_PAIRS);
@@ -1423,7 +1457,7 @@ mod tests {
         let mut init_slot = 0u64;
 
         for _ in 0..NUM_PAIRS {
-            let base = Pubkey::new_unique();
+            let base = create_mint(&mut svm, &payer);
             let (oracle, slot) = init_oracle(&mut svm, &payer, &base, &quote_mint, DEFAULT_CAPACITY);
             base_mints.push(base);
             oracle_pdas.push(oracle);

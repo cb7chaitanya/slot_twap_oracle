@@ -1,16 +1,17 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token_interface::Mint;
 
 use crate::errors::OracleError;
 use crate::state::{ObservationBuffer, Oracle};
 
 #[derive(Accounts)]
-#[instruction(base_mint: Pubkey, quote_mint: Pubkey, capacity: u32)]
+#[instruction(capacity: u32)]
 pub struct InitializeOracle<'info> {
     #[account(
         init,
         payer = authority,
         space = 8 + Oracle::INIT_SPACE,
-        seeds = [b"oracle", base_mint.as_ref(), quote_mint.as_ref()],
+        seeds = [b"oracle", base_mint.key().as_ref(), quote_mint.key().as_ref()],
         bump,
     )]
     pub oracle: Account<'info, Oracle>,
@@ -24,6 +25,9 @@ pub struct InitializeOracle<'info> {
     )]
     pub observation_buffer: Account<'info, ObservationBuffer>,
 
+    pub base_mint: InterfaceAccount<'info, Mint>,
+    pub quote_mint: InterfaceAccount<'info, Mint>,
+
     #[account(mut)]
     pub authority: Signer<'info>,
 
@@ -32,8 +36,6 @@ pub struct InitializeOracle<'info> {
 
 pub fn handler(
     ctx: Context<InitializeOracle>,
-    base_mint: Pubkey,
-    quote_mint: Pubkey,
     capacity: u32,
 ) -> Result<()> {
     require!(capacity > 0, OracleError::InvalidCapacity);
@@ -42,8 +44,8 @@ pub fn handler(
     let clock = Clock::get()?;
 
     oracle.authority = ctx.accounts.authority.key();
-    oracle.base_mint = base_mint;
-    oracle.quote_mint = quote_mint;
+    oracle.base_mint = ctx.accounts.base_mint.key();
+    oracle.quote_mint = ctx.accounts.quote_mint.key();
     oracle.last_price = 0;
     oracle.cumulative_price = 0;
     oracle.last_slot = clock.slot;
