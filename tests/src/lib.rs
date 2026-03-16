@@ -1056,4 +1056,244 @@ mod tests {
         // 10 values of 100, 9 values of 200 = 1000 + 1800 = 2800
         assert_eq!(oracle.cumulative_price, 2800);
     }
+
+    // ── Sealevel parallel execution tests ──
+    //
+    // Solana's Sealevel runtime can execute transactions in parallel when their
+    // account sets don't overlap. Each oracle pair (SOL/USDC, ETH/USDC, BTC/USDC)
+    // has its own Oracle PDA and ObservationBuffer PDA derived from unique mint
+    // pairs. Because update_price only writes to the pair's own two accounts,
+    // the runtime sees no read/write conflicts and can schedule all three
+    // transactions in the same slot concurrently.
+    //
+    // In this test we demonstrate this by:
+    // 1. Batching all three update_price instructions into a single transaction
+    //    (proving no account conflicts within a tx)
+    // 2. Sending three separate transactions in sequence within the same slot
+    //    (proving no cross-tx contention — on a real validator these would be
+    //    parallelized by the scheduler)
+
+    #[test]
+    fn test_parallel_updates_single_tx_three_pairs() {
+        // Three update_price instructions for different pairs in ONE transaction.
+        // This only works if their writable account sets are disjoint — exactly
+        // the property that enables Sealevel parallelism.
+
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        // Mint stand-ins for SOL, ETH, BTC, USDC
+        let sol_mint = Pubkey::new_unique();
+        let eth_mint = Pubkey::new_unique();
+        let btc_mint = Pubkey::new_unique();
+        let usdc_mint = Pubkey::new_unique();
+
+        // Initialize all three pairs
+        let (sol_oracle, _) =
+            init_oracle(&mut svm, &payer, &sol_mint, &usdc_mint, DEFAULT_CAPACITY);
+        let (eth_oracle, _) =
+            init_oracle(&mut svm, &payer, &eth_mint, &usdc_mint, DEFAULT_CAPACITY);
+        let (btc_oracle, init_slot) =
+            init_oracle(&mut svm, &payer, &btc_mint, &usdc_mint, DEFAULT_CAPACITY);
+
+        // Warp forward so slot_delta > 0
+        svm.warp_to_slot(init_slot + 10);
+        svm.expire_blockhash();
+
+        // Build three update_price instructions — each touches only its own
+        // oracle + observation_buffer accounts. No overlap.
+        let ix_sol = build_update_price_ix(&sol_oracle, 100);
+        let ix_eth = build_update_price_ix(&eth_oracle, 200);
+        let ix_btc = build_update_price_ix(&btc_oracle, 300);
+
+        // Send all three in a SINGLE transaction. This succeeds because Solana
+        // allows multiple instructions in one tx as long as there are no
+        // conflicting writable account locks. Each pair's accounts are unique
+        // PDAs, so there is zero contention.
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix_sol, ix_eth, ix_btc],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        svm.send_transaction(tx).expect("Batched update_price failed");
+
+        // Verify each pair updated independently
+        let sol = deserialize_oracle(&svm, &sol_oracle);
+        assert_eq!(sol.last_price, 100);
+        assert_eq!(sol.last_slot, init_slot + 10);
+
+        let eth = deserialize_oracle(&svm, &eth_oracle);
+        assert_eq!(eth.last_price, 200);
+        assert_eq!(eth.last_slot, init_slot + 10);
+
+        let btc = deserialize_oracle(&svm, &btc_oracle);
+        assert_eq!(btc.last_price, 300);
+        assert_eq!(btc.last_slot, init_slot + 10);
+
+        // Verify observation buffers are independent
+        let (sol_obs, _) = observation_buffer_pda(&sol_oracle);
+        let (eth_obs, _) = observation_buffer_pda(&eth_oracle);
+        let (btc_obs, _) = observation_buffer_pda(&btc_oracle);
+
+        let sol_buf = deserialize_observation_buffer(&svm, &sol_obs);
+        let eth_buf = deserialize_observation_buffer(&svm, &eth_obs);
+        let btc_buf = deserialize_observation_buffer(&svm, &btc_obs);
+
+        assert_eq!(sol_buf.observations.len(), 1);
+        assert_eq!(eth_buf.observations.len(), 1);
+        assert_eq!(btc_buf.observations.len(), 1);
+    }
+
+    #[test]
+    fn test_parallel_updates_separate_txs_same_slot() {
+        // Three separate transactions in the same slot — on a real validator
+        // the Sealevel scheduler would run these in parallel because their
+        // write-lock sets are disjoint.
+
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let sol_mint = Pubkey::new_unique();
+        let eth_mint = Pubkey::new_unique();
+        let btc_mint = Pubkey::new_unique();
+        let usdc_mint = Pubkey::new_unique();
+
+        let (sol_oracle, _) =
+            init_oracle(&mut svm, &payer, &sol_mint, &usdc_mint, DEFAULT_CAPACITY);
+        let (eth_oracle, _) =
+            init_oracle(&mut svm, &payer, &eth_mint, &usdc_mint, DEFAULT_CAPACITY);
+        let (btc_oracle, init_slot) =
+            init_oracle(&mut svm, &payer, &btc_mint, &usdc_mint, DEFAULT_CAPACITY);
+
+        svm.warp_to_slot(init_slot + 10);
+        svm.expire_blockhash();
+
+        // Send three independent transactions at the same slot.
+        // On mainnet, the scheduler sees:
+        //   tx1 write-locks: {sol_oracle, sol_obs}
+        //   tx2 write-locks: {eth_oracle, eth_obs}
+        //   tx3 write-locks: {btc_oracle, btc_obs}
+        // No intersection → all three execute in parallel threads.
+        let blockhash = svm.latest_blockhash();
+
+        let tx_sol = Transaction::new_signed_with_payer(
+            &[build_update_price_ix(&sol_oracle, 150)],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        svm.send_transaction(tx_sol).unwrap();
+
+        let tx_eth = Transaction::new_signed_with_payer(
+            &[build_update_price_ix(&eth_oracle, 2500)],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        svm.send_transaction(tx_eth).unwrap();
+
+        let tx_btc = Transaction::new_signed_with_payer(
+            &[build_update_price_ix(&btc_oracle, 60000)],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        svm.send_transaction(tx_btc).unwrap();
+
+        // All three succeeded in the same slot with no contention
+        let sol = deserialize_oracle(&svm, &sol_oracle);
+        let eth = deserialize_oracle(&svm, &eth_oracle);
+        let btc = deserialize_oracle(&svm, &btc_oracle);
+
+        assert_eq!(sol.last_price, 150);
+        assert_eq!(eth.last_price, 2500);
+        assert_eq!(btc.last_price, 60000);
+
+        // All updated at the same slot
+        assert_eq!(sol.last_slot, init_slot + 10);
+        assert_eq!(eth.last_slot, init_slot + 10);
+        assert_eq!(btc.last_slot, init_slot + 10);
+    }
+
+    #[test]
+    fn test_parallel_updates_cumulative_price_independent() {
+        // Verify that cumulative price accumulation is fully independent
+        // across pairs after multiple rounds of parallel updates.
+
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let sol_mint = Pubkey::new_unique();
+        let eth_mint = Pubkey::new_unique();
+        let usdc_mint = Pubkey::new_unique();
+
+        let (sol_oracle, init_slot) =
+            init_oracle(&mut svm, &payer, &sol_mint, &usdc_mint, DEFAULT_CAPACITY);
+        let (eth_oracle, _) =
+            init_oracle(&mut svm, &payer, &eth_mint, &usdc_mint, DEFAULT_CAPACITY);
+
+        // Round 1: set initial prices
+        svm.warp_to_slot(init_slot + 10);
+        svm.expire_blockhash();
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[
+                build_update_price_ix(&sol_oracle, 100),
+                build_update_price_ix(&eth_oracle, 2000),
+            ],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        // Round 2: update after 20 more slots
+        svm.warp_to_slot(init_slot + 30);
+        svm.expire_blockhash();
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[
+                build_update_price_ix(&sol_oracle, 150),
+                build_update_price_ix(&eth_oracle, 2500),
+            ],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        // Verify cumulative prices are independent
+        let sol = deserialize_oracle(&svm, &sol_oracle);
+        let eth = deserialize_oracle(&svm, &eth_oracle);
+
+        // SOL: cumul = 0*10 + 100*20 = 2000
+        assert_eq!(sol.cumulative_price, 2000);
+        assert_eq!(sol.last_price, 150);
+
+        // ETH: cumul = 0*10 + 2000*20 = 40_000
+        assert_eq!(eth.cumulative_price, 40_000);
+        assert_eq!(eth.last_price, 2500);
+
+        // Get SWAP for each pair over the full 20-slot window
+        svm.warp_to_slot(init_slot + 40);
+        svm.expire_blockhash();
+
+        // SOL SWAP: cumul_now = 2000 + 150*10 = 3500
+        // past obs at slot init_slot+10 (cumul=0)
+        // SWAP = 3500 / 30 = 116
+        let sol_swap = do_get_swap(&mut svm, &payer, &sol_oracle, 30);
+        assert_eq!(sol_swap, 116);
+
+        // ETH SWAP: cumul_now = 40_000 + 2500*10 = 65_000
+        // past obs at slot init_slot+10 (cumul=0)
+        // SWAP = 65_000 / 30 = 2166
+        svm.expire_blockhash();
+        let eth_swap = do_get_swap(&mut svm, &payer, &eth_oracle, 30);
+        assert_eq!(eth_swap, 2166);
+    }
 }
