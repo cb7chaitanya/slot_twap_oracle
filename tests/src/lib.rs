@@ -556,4 +556,133 @@ mod tests {
         let result = svm.send_transaction(tx);
         assert!(result.is_err());
     }
+
+    // ── Scenario tests (mocked slots) ──
+
+    #[test]
+    fn test_initialize_oracle_creates_account_correctly() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+
+        // Warp to a known slot so init is deterministic
+        svm.warp_to_slot(50);
+        svm.expire_blockhash();
+
+        let (oracle_pda, _) = oracle_pda(&base_mint, &quote_mint);
+        let ix = build_initialize_ix(&payer.pubkey(), &base_mint, &quote_mint, DEFAULT_CAPACITY);
+        let blockhash = svm.latest_blockhash();
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+        svm.send_transaction(tx).unwrap();
+
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.base_mint, base_mint);
+        assert_eq!(oracle.quote_mint, quote_mint);
+        assert_eq!(oracle.last_price, 0);
+        assert_eq!(oracle.cumulative_price, 0);
+        assert_eq!(oracle.last_slot, 50);
+
+        let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
+        let buffer = deserialize_observation_buffer(&svm, &obs_pda);
+        assert_eq!(buffer.oracle, oracle_pda);
+        assert_eq!(buffer.head, 0);
+        assert_eq!(buffer.capacity, DEFAULT_CAPACITY);
+        assert!(buffer.observations.is_empty());
+    }
+
+    #[test]
+    fn test_update_price_cumulative_math_three_updates() {
+        // Simulate: slot 100 price 10, slot 110 price 20, slot 120 price 15
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+
+        // Initialize at slot 90 so last_slot = 90
+        svm.warp_to_slot(90);
+        svm.expire_blockhash();
+        let (oracle_pda, _) = oracle_pda(&base_mint, &quote_mint);
+        let ix = build_initialize_ix(&payer.pubkey(), &base_mint, &quote_mint, DEFAULT_CAPACITY);
+        let blockhash = svm.latest_blockhash();
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+        svm.send_transaction(tx).unwrap();
+
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_slot, 90);
+
+        // Slot 100: set price=10
+        // slot_delta = 100 - 90 = 10, weighted = 0 * 10 = 0
+        // cumulative = 0 + 0 = 0, last_price = 10, last_slot = 100
+        do_update_price(&mut svm, &payer, &oracle_pda, 10, 100);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 10);
+        assert_eq!(oracle.cumulative_price, 0);
+        assert_eq!(oracle.last_slot, 100);
+
+        // Slot 110: set price=20
+        // slot_delta = 110 - 100 = 10, weighted = 10 * 10 = 100
+        // cumulative = 0 + 100 = 100, last_price = 20, last_slot = 110
+        do_update_price(&mut svm, &payer, &oracle_pda, 20, 110);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 20);
+        assert_eq!(oracle.cumulative_price, 100);
+        assert_eq!(oracle.last_slot, 110);
+
+        // Slot 120: set price=15
+        // slot_delta = 120 - 110 = 10, weighted = 20 * 10 = 200
+        // cumulative = 100 + 200 = 300, last_price = 15, last_slot = 120
+        do_update_price(&mut svm, &payer, &oracle_pda, 15, 120);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 15);
+        assert_eq!(oracle.cumulative_price, 300);
+        assert_eq!(oracle.last_slot, 120);
+    }
+
+    #[test]
+    fn test_get_swap_over_20_slot_window() {
+        // After the three updates above, test SWAP over a 20-slot window
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+
+        // Initialize at slot 90
+        svm.warp_to_slot(90);
+        svm.expire_blockhash();
+        let (oracle_pda, _) = oracle_pda(&base_mint, &quote_mint);
+        let ix = build_initialize_ix(&payer.pubkey(), &base_mint, &quote_mint, DEFAULT_CAPACITY);
+        let blockhash = svm.latest_blockhash();
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+        svm.send_transaction(tx).unwrap();
+
+        // slot 100: price=10, cumulative=0
+        do_update_price(&mut svm, &payer, &oracle_pda, 10, 100);
+        // slot 110: price=20, cumulative=100
+        do_update_price(&mut svm, &payer, &oracle_pda, 20, 110);
+        // slot 120: price=15, cumulative=300
+        do_update_price(&mut svm, &payer, &oracle_pda, 15, 120);
+
+        // Call get_swap at slot 120 with window_slots=20
+        // current_slot = 120, slot_delta_since_last = 0
+        // cumulative_now = 300
+        // window_start = 120 - 20 = 100
+        // Past obs: need slot <= 100 → observation at slot 100 (cumulative=0)
+        // SWAP = (300 - 0) / (120 - 100) = 300 / 20 = 15
+        let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 20);
+        assert_eq!(swap, 15);
+
+        // Verify: this makes sense because over slots 100-120:
+        // price=10 for 10 slots (100-110), price=20 for 10 slots (110-120)
+        // weighted avg = (10*10 + 20*10) / 20 = 300/20 = 15
+    }
 }
