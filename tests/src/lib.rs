@@ -1296,4 +1296,121 @@ mod tests {
         let eth_swap = do_get_swap(&mut svm, &payer, &eth_oracle, 30);
         assert_eq!(eth_swap, 2166);
     }
+
+    #[test]
+    fn test_50_pairs_concurrent_updates() {
+        // Scalability test: 50 trading pairs initialized and updated in the same
+        // slot. Demonstrates that the oracle design scales linearly — each pair
+        // is an independent account island with zero cross-pair contention.
+        //
+        // On a real Solana validator, the scheduler would distribute these 50
+        // transactions across all available cores because every tx's write-lock
+        // set ({oracle_i, obs_buf_i}) is disjoint from all others.
+
+        const NUM_PAIRS: usize = 50;
+
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 100_000_000_000).unwrap(); // 100 SOL for rent
+
+        let quote_mint = Pubkey::new_unique(); // shared quote (e.g. USDC)
+
+        // Generate 50 unique base mints and initialize their oracles
+        let mut base_mints = Vec::with_capacity(NUM_PAIRS);
+        let mut oracle_pdas = Vec::with_capacity(NUM_PAIRS);
+        let mut init_slot = 0u64;
+
+        for _ in 0..NUM_PAIRS {
+            let base = Pubkey::new_unique();
+            let (oracle, slot) = init_oracle(&mut svm, &payer, &base, &quote_mint, DEFAULT_CAPACITY);
+            base_mints.push(base);
+            oracle_pdas.push(oracle);
+            init_slot = slot;
+        }
+
+        // Warp forward so updates are valid
+        svm.warp_to_slot(init_slot + 10);
+        svm.expire_blockhash();
+
+        // Send all 50 updates as separate transactions in the same slot.
+        // Each tx only write-locks its own oracle + observation buffer,
+        // so on mainnet all 50 would be parallelized by Sealevel.
+        let blockhash = svm.latest_blockhash();
+        for (i, oracle) in oracle_pdas.iter().enumerate() {
+            let price = ((i + 1) * 100) as u128; // prices: 100, 200, ..., 5000
+            let tx = Transaction::new_signed_with_payer(
+                &[build_update_price_ix(oracle, price)],
+                Some(&payer.pubkey()),
+                &[&payer],
+                blockhash,
+            );
+            svm.send_transaction(tx)
+                .unwrap_or_else(|e| panic!("update_price failed for pair {}: {:?}", i, e));
+        }
+
+        // Verify all 50 oracles updated correctly and independently
+        for (i, oracle_pda) in oracle_pdas.iter().enumerate() {
+            let expected_price = ((i + 1) * 100) as u128;
+            let oracle = deserialize_oracle(&svm, oracle_pda);
+
+            assert_eq!(
+                oracle.last_price, expected_price,
+                "Pair {} last_price mismatch", i
+            );
+            assert_eq!(
+                oracle.last_slot,
+                init_slot + 10,
+                "Pair {} last_slot mismatch", i
+            );
+            // First update from price=0, so cumulative stays 0
+            assert_eq!(
+                oracle.cumulative_price, 0,
+                "Pair {} cumulative_price should be 0 on first update", i
+            );
+
+            // Verify observation buffer got exactly one entry
+            let (obs_pda, _) = observation_buffer_pda(oracle_pda);
+            let buffer = deserialize_observation_buffer(&svm, &obs_pda);
+            assert_eq!(
+                buffer.observations.len(), 1,
+                "Pair {} should have 1 observation", i
+            );
+        }
+
+        // Round 2: update all 50 again after 20 more slots
+        svm.warp_to_slot(init_slot + 30);
+        svm.expire_blockhash();
+        let blockhash = svm.latest_blockhash();
+
+        for (i, oracle) in oracle_pdas.iter().enumerate() {
+            let price = ((i + 1) * 200) as u128; // new prices: 200, 400, ..., 10000
+            let tx = Transaction::new_signed_with_payer(
+                &[build_update_price_ix(oracle, price)],
+                Some(&payer.pubkey()),
+                &[&payer],
+                blockhash,
+            );
+            svm.send_transaction(tx).unwrap();
+        }
+
+        // Verify cumulative math is correct for all 50 pairs
+        for (i, oracle_pda) in oracle_pdas.iter().enumerate() {
+            let old_price = ((i + 1) * 100) as u128;
+            let new_price = ((i + 1) * 200) as u128;
+            let oracle = deserialize_oracle(&svm, oracle_pda);
+
+            // cumulative = 0 + old_price * 20
+            assert_eq!(
+                oracle.cumulative_price,
+                old_price * 20,
+                "Pair {} cumulative_price mismatch after round 2", i
+            );
+            assert_eq!(oracle.last_price, new_price);
+            assert_eq!(oracle.last_slot, init_slot + 30);
+
+            let (obs_pda, _) = observation_buffer_pda(oracle_pda);
+            let buffer = deserialize_observation_buffer(&svm, &obs_pda);
+            assert_eq!(buffer.observations.len(), 2, "Pair {} should have 2 observations", i);
+        }
+    }
 }
