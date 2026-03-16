@@ -1,8 +1,13 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 
+const RAYDIUM_AMM_PROGRAM_ID = new PublicKey(
+  "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+);
+
 // Raydium AMM v4 account layout offsets for token vault pubkeys.
 // The full layout is 752 bytes; we only need the two vault addresses.
+const AMM_ACCOUNT_MIN_SIZE = 752;
 const BASE_VAULT_OFFSET = 336;
 const QUOTE_VAULT_OFFSET = 368;
 
@@ -22,6 +27,28 @@ export async function fetchRaydiumPrice(
 ): Promise<bigint> {
   const ammAccount = await connection.getAccountInfo(ammId);
   if (!ammAccount) throw new Error(`AMM account not found: ${ammId.toBase58()}`);
+
+  // Verify the account is owned by the Raydium AMM program. Without this
+  // check, an attacker could pass an arbitrary account whose data happens to
+  // decode into plausible vault pubkeys, redirecting reads to attacker-
+  // controlled token accounts and producing a manipulated price.
+  if (!ammAccount.owner.equals(RAYDIUM_AMM_PROGRAM_ID)) {
+    throw new Error(
+      `AMM account ${ammId.toBase58()} is not owned by Raydium AMM program. ` +
+        `Expected owner: ${RAYDIUM_AMM_PROGRAM_ID.toBase58()}, ` +
+        `actual owner: ${ammAccount.owner.toBase58()}`
+    );
+  }
+
+  // Ensure the account data is large enough to contain the full AMM v4
+  // struct. A truncated or reallocated account would cause the vault
+  // pubkey reads below to silently return garbage bytes.
+  if (ammAccount.data.length < AMM_ACCOUNT_MIN_SIZE) {
+    throw new Error(
+      `AMM account ${ammId.toBase58()} data too small: ` +
+        `expected >= ${AMM_ACCOUNT_MIN_SIZE} bytes, got ${ammAccount.data.length}`
+    );
+  }
 
   const data = ammAccount.data;
 
