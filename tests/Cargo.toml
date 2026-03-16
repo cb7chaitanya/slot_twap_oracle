@@ -1,0 +1,14 @@
+[package]
+name = "slot_twap_oracle_tests"
+version = "0.1.0"
+edition = "2021"
+
+[[test]]
+name = "integration"
+path = "src/lib.rs"
+
+[dependencies]
+litesvm = "0.6"
+solana-sdk = "2.2"
+anchor-lang = "0.31.1"
+slot_twap_oracle = { path = "../programs/slot_twap_oracle", features = ["no-entrypoint"] }
