@@ -17,6 +17,14 @@ import {
   PriceUpdatedEvent,
 } from "./types";
 
+/**
+ * Client for the Slot TWAP Oracle program.
+ *
+ * @param provider  - Anchor provider with connection and wallet.
+ * @param programId - Optional program ID override. Defaults to the canonical
+ *                    deployed program ID ({@link PROGRAM_ID}). Pass a custom
+ *                    value when targeting localnet or a custom deployment.
+ */
 export class SlotTwapOracleClient {
   readonly program: Program<SlotTwapOracle>;
   readonly programId: PublicKey;
@@ -27,6 +35,9 @@ export class SlotTwapOracleClient {
   }
 
   // ── PDA helpers ──
+  //
+  // These use the programId passed to the constructor, so PDAs match the
+  // target deployment even when overriding the default program ID.
 
   findOraclePda(baseMint: PublicKey, quoteMint: PublicKey): [PublicKey, number] {
     return findOraclePda(baseMint, quoteMint, this.programId);
