@@ -685,4 +685,375 @@ mod tests {
         // price=10 for 10 slots (100-110), price=20 for 10 slots (110-120)
         // weighted avg = (10*10 + 20*10) / 20 = 300/20 = 15
     }
+
+    // ── Edge case tests ──
+
+    /// Helper: send a tx and expect it to fail
+    fn send_tx_expect_err(
+        svm: &mut LiteSVM,
+        payer: &Keypair,
+        instructions: &[Instruction],
+    ) {
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            instructions,
+            Some(&payer.pubkey()),
+            &[payer],
+            blockhash,
+        );
+        let result = svm.send_transaction(tx);
+        assert!(result.is_err(), "Expected transaction to fail");
+    }
+
+    #[test]
+    fn test_double_initialize_same_pair_fails() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Second init with same mints should fail (PDA already exists)
+        let ix = build_initialize_ix(&payer.pubkey(), &base_mint, &quote_mint, DEFAULT_CAPACITY);
+        send_tx_expect_err(&mut svm, &payer, &[ix]);
+    }
+
+    #[test]
+    fn test_different_pairs_are_independent() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let mint_a = Pubkey::new_unique();
+        let mint_b = Pubkey::new_unique();
+        let mint_c = Pubkey::new_unique();
+
+        let (oracle_ab, init_slot_ab) =
+            init_oracle(&mut svm, &payer, &mint_a, &mint_b, DEFAULT_CAPACITY);
+        let (oracle_ac, init_slot_ac) =
+            init_oracle(&mut svm, &payer, &mint_a, &mint_c, DEFAULT_CAPACITY);
+
+        do_update_price(&mut svm, &payer, &oracle_ab, 100, init_slot_ab + 10);
+        do_update_price(&mut svm, &payer, &oracle_ac, 999, init_slot_ac + 10);
+
+        let ab = deserialize_oracle(&svm, &oracle_ab);
+        let ac = deserialize_oracle(&svm, &oracle_ac);
+        assert_eq!(ab.last_price, 100);
+        assert_eq!(ac.last_price, 999);
+    }
+
+    #[test]
+    fn test_update_price_stale_slot_fails() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
+
+        // Try updating at the same slot (no warp) — should fail with StaleSlot
+        let ix = build_update_price_ix(&oracle_pda, 200);
+        send_tx_expect_err(&mut svm, &payer, &[ix]);
+    }
+
+    #[test]
+    fn test_update_price_zero_price() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Set price to 100, then back to 0
+        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 0, init_slot + 20);
+
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 0);
+        // cumulative = 0 + 100*10 = 1000
+        assert_eq!(oracle.cumulative_price, 1000);
+
+        // Another update — zero price contributes nothing to cumulative
+        do_update_price(&mut svm, &payer, &oracle_pda, 50, init_slot + 30);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        // cumulative = 1000 + 0*10 = 1000
+        assert_eq!(oracle.cumulative_price, 1000);
+    }
+
+    #[test]
+    fn test_update_price_large_values() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Use a large price that fits in u128 but tests big arithmetic
+        let big_price: u128 = 1_000_000_000_000_000_000; // 1e18
+        do_update_price(&mut svm, &payer, &oracle_pda, big_price, init_slot + 10);
+
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, big_price);
+        assert_eq!(oracle.cumulative_price, 0); // first update from price=0
+
+        do_update_price(&mut svm, &payer, &oracle_pda, big_price, init_slot + 20);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        // cumulative = 1e18 * 10 = 1e19
+        assert_eq!(oracle.cumulative_price, big_price * 10);
+    }
+
+    #[test]
+    fn test_update_price_single_slot_delta() {
+        // Minimum valid slot delta is 1
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        do_update_price(&mut svm, &payer, &oracle_pda, 500, init_slot + 1);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_slot, init_slot + 1);
+        assert_eq!(oracle.cumulative_price, 0); // 0 * 1
+
+        do_update_price(&mut svm, &payer, &oracle_pda, 600, init_slot + 2);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        // cumulative = 0 + 500 * 1 = 500
+        assert_eq!(oracle.cumulative_price, 500);
+    }
+
+    #[test]
+    fn test_observation_buffer_capacity_one() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, 1);
+
+        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
+
+        let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
+        let buffer = deserialize_observation_buffer(&svm, &obs_pda);
+        assert_eq!(buffer.observations.len(), 1);
+        assert_eq!(buffer.observations[0].slot, init_slot + 10);
+
+        // Second update overwrites the only slot
+        do_update_price(&mut svm, &payer, &oracle_pda, 200, init_slot + 20);
+        let buffer = deserialize_observation_buffer(&svm, &obs_pda);
+        assert_eq!(buffer.observations.len(), 1);
+        assert_eq!(buffer.observations[0].slot, init_slot + 20);
+        assert_eq!(buffer.observations[0].cumulative_price, 1000); // 100 * 10
+    }
+
+    #[test]
+    fn test_get_observation_before_slot_after_wrap() {
+        // After ring wraps, ensure lookup still finds correct entries
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, 3);
+
+        // Fill buffer: slots +10, +20, +30
+        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 200, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 300, init_slot + 30);
+
+        // Overwrite oldest: slot +40 replaces slot +10
+        do_update_price(&mut svm, &payer, &oracle_pda, 400, init_slot + 40);
+
+        let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
+        let buffer = deserialize_observation_buffer(&svm, &obs_pda);
+
+        // Slot +10 is gone. Looking before +25 should find +20
+        let obs = get_observation_before_slot(&buffer, init_slot + 25).unwrap();
+        assert_eq!(obs.slot, init_slot + 20);
+
+        // Looking before +35 should find +30
+        let obs = get_observation_before_slot(&buffer, init_slot + 35).unwrap();
+        assert_eq!(obs.slot, init_slot + 30);
+
+        // Looking before +41 should find +40 (the newest)
+        let obs = get_observation_before_slot(&buffer, init_slot + 41).unwrap();
+        assert_eq!(obs.slot, init_slot + 40);
+
+        // Looking before +20 — slot +10 is overwritten, nothing qualifies
+        let obs = get_observation_before_slot(&buffer, init_slot + 20);
+        assert!(obs.is_none());
+    }
+
+    #[test]
+    fn test_get_swap_with_elapsed_time_since_last_update() {
+        // get_swap should extend cumulative to current slot even without an update
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Set price=100 at slot+10
+        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
+
+        // Warp to slot+110 without any more updates
+        svm.warp_to_slot(init_slot + 110);
+        svm.expire_blockhash();
+
+        // cumulative_now = 0 + 100*(110 - 10) = 10_000
+        // window=100: window_start = 110-100 = init_slot+10
+        // past_obs at slot init_slot+10 (cumul=0)
+        // SWAP = 10_000 / (110 - 10) = 100
+        let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 100);
+        assert_eq!(swap, 100);
+    }
+
+    #[test]
+    fn test_get_swap_single_observation() {
+        // Only one observation exists — get_swap should work if window covers it
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        do_update_price(&mut svm, &payer, &oracle_pda, 250, init_slot + 10);
+
+        svm.warp_to_slot(init_slot + 30);
+        svm.expire_blockhash();
+
+        // cumulative_now = 0 + 250*(30-10) = 5000
+        // window=20: window_start = 30-20 = init_slot+10
+        // past_obs: slot init_slot+10 (cumul=0)
+        // SWAP = 5000 / 20 = 250
+        let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 20);
+        assert_eq!(swap, 250);
+    }
+
+    #[test]
+    fn test_get_swap_window_exactly_on_observation() {
+        // Window start lands exactly on an observation slot
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 300, init_slot + 20);
+
+        svm.warp_to_slot(init_slot + 30);
+        svm.expire_blockhash();
+
+        // cumulative_now = 0 + 100*10 + 300*10 = 4000
+        // window=20: window_start = 30-20 = init_slot+10
+        // get_observation_before_slot(init_slot+11) → slot init_slot+10 (cumul=0)
+        // SWAP = 4000 / (30-10) = 200
+        let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 20);
+        assert_eq!(swap, 200);
+    }
+
+    #[test]
+    fn test_get_swap_after_ring_buffer_wraps() {
+        // Ensure get_swap still works after oldest observations are overwritten
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, 3);
+
+        // Fill buffer: 3 observations
+        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 200, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 300, init_slot + 30);
+
+        // Wrap: overwrites slot+10
+        do_update_price(&mut svm, &payer, &oracle_pda, 400, init_slot + 40);
+
+        svm.warp_to_slot(init_slot + 50);
+        svm.expire_blockhash();
+
+        // cumulative at slot+40: 0 + 100*10 + 200*10 + 300*10 = 6000
+        // cumulative_now = 6000 + 400*10 = 10_000
+        // window=20: window_start = init_slot+30
+        // past_obs: need slot <= init_slot+30 → slot+30 (cumul=3000 at the time? let's check)
+        // obs at slot+20: cumul=1000, obs at slot+30: cumul=3000, obs at slot+40: cumul=6000
+        // past_obs = slot+30 (cumul=3000)
+        // SWAP = (10_000 - 3000) / (50 - 30) = 7000/20 = 350
+        let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 20);
+        assert_eq!(swap, 350);
+    }
+
+    #[test]
+    fn test_compute_swap_zero_slot_delta_fails() {
+        let result = compute_swap(1000, 0, 10, 10);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_many_rapid_updates() {
+        // Stress test: many updates, 1 slot apart each
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // 20 updates, alternating price between 100 and 200
+        for i in 1..=20u64 {
+            let price = if i % 2 == 0 { 200 } else { 100 };
+            do_update_price(&mut svm, &payer, &oracle_pda, price, init_slot + i);
+        }
+
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_slot, init_slot + 20);
+        assert_eq!(oracle.last_price, 200);
+
+        // cumulative: first update (i=1) adds 0*1=0, second (i=2) adds 100*1=100,
+        // third (i=3) adds 200*1=200, etc.
+        // Sum = 0 + sum of (price_at_slot * 1) for slots 1..19
+        // Prices set: 100,200,100,200,...,100,200 (at slots 1..20)
+        // Weighted contributions from previous price:
+        // slot 1: prev=0, delta=1 → 0
+        // slot 2: prev=100, delta=1 → 100
+        // slot 3: prev=200, delta=1 → 200
+        // ...pattern: 0, 100, 200, 100, 200, ...
+        // Slots 2-20 (19 values): 100,200 alternating starting with 100
+        // 10 values of 100, 9 values of 200 = 1000 + 1800 = 2800
+        assert_eq!(oracle.cumulative_price, 2800);
+    }
 }
