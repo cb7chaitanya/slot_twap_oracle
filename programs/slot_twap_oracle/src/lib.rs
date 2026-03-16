@@ -27,4 +27,8 @@ pub mod slot_twap_oracle {
     pub fn update_price(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
         instructions::update_price::handler(ctx, new_price)
     }
+
+    pub fn get_swap(ctx: Context<GetSwap>, window_slots: u64) -> Result<u128> {
+        instructions::get_swap::handler(ctx, window_slots)
+    }
 }
