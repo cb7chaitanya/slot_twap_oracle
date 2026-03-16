@@ -1,0 +1,21 @@
+{
+  "name": "slot-twap-updater",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "build": "tsc",
+    "start:built": "node dist/index.js"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@solana/web3.js": "^1.98.0",
+    "bs58": "^5.0.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.7.0"
+  }
+}
