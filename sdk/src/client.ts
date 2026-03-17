@@ -60,18 +60,15 @@ export class SlotTwapOracleClient {
   async updatePrice(
     oracle: PublicKey,
     newPrice: BN,
-    authority: Signer
+    payer: Signer
   ): Promise<string> {
-    const [observationBuffer] = this.findObservationBufferPda(oracle);
-
     return this.program.methods
       .updatePrice(newPrice)
       .accounts({
-        authority: authority.publicKey,
+        payer: payer.publicKey,
         oracle,
-        observationBuffer,
       })
-      .signers([authority])
+      .signers([payer])
       .rpc();
   }
 

@@ -11,7 +11,17 @@ export type SlotTwapOracle = {
       name: "getSwap";
       discriminator: [228, 117, 165, 168, 20, 75, 117, 0];
       accounts: [
-        { name: "oracle"; relations: ["observationBuffer"] },
+        {
+          name: "oracle";
+          pda: {
+            seeds: [
+              { kind: "const"; value: [111, 114, 97, 99, 108, 101] },
+              { kind: "account"; path: "oracle.base_mint"; account: "Oracle" },
+              { kind: "account"; path: "oracle.quote_mint"; account: "Oracle" }
+            ];
+          };
+          relations: ["observationBuffer"];
+        },
         {
           name: "observationBuffer";
           pda: {
@@ -61,11 +71,10 @@ export type SlotTwapOracle = {
       name: "updatePrice";
       discriminator: [61, 34, 117, 155, 75, 34, 123, 208];
       accounts: [
-        { name: "authority"; signer: true; relations: ["oracle"] },
+        { name: "payer"; signer: true },
         {
           name: "oracle";
           writable: true;
-          relations: ["observationBuffer"];
         },
         {
           name: "observationBuffer";
@@ -120,7 +129,6 @@ export type SlotTwapOracle = {
       type: {
         kind: "struct";
         fields: [
-          { name: "authority"; type: "pubkey" },
           { name: "baseMint"; type: "pubkey" },
           { name: "quoteMint"; type: "pubkey" },
           { name: "lastPrice"; type: "u128" },
@@ -156,7 +164,17 @@ export const IDL: SlotTwapOracle = {
       name: "getSwap",
       discriminator: [228, 117, 165, 168, 20, 75, 117, 0],
       accounts: [
-        { name: "oracle", relations: ["observationBuffer"] },
+        {
+          name: "oracle",
+          pda: {
+            seeds: [
+              { kind: "const", value: [111, 114, 97, 99, 108, 101] },
+              { kind: "account", path: "oracle.base_mint", account: "Oracle" },
+              { kind: "account", path: "oracle.quote_mint", account: "Oracle" },
+            ],
+          },
+          relations: ["observationBuffer"],
+        },
         {
           name: "observationBuffer",
           pda: {
@@ -206,11 +224,10 @@ export const IDL: SlotTwapOracle = {
       name: "updatePrice",
       discriminator: [61, 34, 117, 155, 75, 34, 123, 208],
       accounts: [
-        { name: "authority", signer: true, relations: ["oracle"] },
+        { name: "payer", signer: true },
         {
           name: "oracle",
           writable: true,
-          relations: ["observationBuffer"],
         },
         {
           name: "observationBuffer",
@@ -265,7 +282,6 @@ export const IDL: SlotTwapOracle = {
       type: {
         kind: "struct",
         fields: [
-          { name: "authority", type: "pubkey" },
           { name: "baseMint", type: "pubkey" },
           { name: "quoteMint", type: "pubkey" },
           { name: "lastPrice", type: "u128" },

@@ -43,7 +43,6 @@ pub fn handler(
     let oracle = &mut ctx.accounts.oracle;
     let clock = Clock::get()?;
 
-    oracle.authority = ctx.accounts.authority.key();
     oracle.base_mint = ctx.accounts.base_mint.key();
     oracle.quote_mint = ctx.accounts.quote_mint.key();
     oracle.last_price = 0;

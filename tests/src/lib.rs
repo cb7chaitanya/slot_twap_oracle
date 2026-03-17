@@ -123,7 +123,7 @@ mod tests {
     }
 
     fn build_update_price_ix(
-        authority: &Pubkey,
+        payer: &Pubkey,
         oracle: &Pubkey,
         new_price: u128,
     ) -> Instruction {
@@ -133,7 +133,7 @@ mod tests {
         Instruction {
             program_id: program_id(),
             accounts: vec![
-                AccountMeta::new_readonly(*authority, true),
+                AccountMeta::new_readonly(*payer, true),
                 AccountMeta::new(*oracle, false),
                 AccountMeta::new(obs_pda, false),
             ],
@@ -861,41 +861,39 @@ mod tests {
     }
 
     #[test]
-    fn test_update_price_unauthorized_fails() {
+    fn test_update_price_permissionless() {
+        // Any signer can update the oracle — not just the initializer.
         let mut svm = setup();
-        let authority = Keypair::new();
-        let attacker = Keypair::new();
-        svm.airdrop(&authority.pubkey(), 10_000_000_000).unwrap();
-        svm.airdrop(&attacker.pubkey(), 10_000_000_000).unwrap();
+        let initializer = Keypair::new();
+        let updater_a = Keypair::new();
+        let updater_b = Keypair::new();
+        svm.airdrop(&initializer.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&updater_a.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&updater_b.pubkey(), 10_000_000_000).unwrap();
 
-        let base_mint = create_mint(&mut svm, &authority);
-        let quote_mint = create_mint(&mut svm, &authority);
+        let base_mint = create_mint(&mut svm, &initializer);
+        let quote_mint = create_mint(&mut svm, &initializer);
         let (oracle_pda, init_slot) =
-            init_oracle(&mut svm, &authority, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+            init_oracle(&mut svm, &initializer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        svm.warp_to_slot(init_slot + 10);
-        svm.expire_blockhash();
-
-        // Attacker tries to update price — should fail because attacker != authority
-        let ix = build_update_price_ix(&attacker.pubkey(), &oracle_pda, 999);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&attacker.pubkey()),
-            &[&attacker],
-            blockhash,
-        );
-        let result = svm.send_transaction(tx);
-        assert!(result.is_err(), "Unauthorized update should fail");
-
-        // Verify oracle was not modified
-        let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.last_price, 0);
-
-        // Authority can still update
-        do_update_price(&mut svm, &authority, &oracle_pda, 500, init_slot + 10);
+        // updater_a (different from initializer) updates successfully
+        do_update_price(&mut svm, &updater_a, &oracle_pda, 500, init_slot + 10);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         assert_eq!(oracle.last_price, 500);
+
+        // updater_b (yet another signer) also updates successfully
+        do_update_price(&mut svm, &updater_b, &oracle_pda, 750, init_slot + 20);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 750);
+        // cumulative = 0 + 500*10 = 5000
+        assert_eq!(oracle.cumulative_price, 5000);
+
+        // initializer can still update too
+        do_update_price(&mut svm, &initializer, &oracle_pda, 900, init_slot + 30);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 900);
+        // cumulative = 5000 + 750*10 = 12500
+        assert_eq!(oracle.cumulative_price, 12500);
     }
 
     #[test]

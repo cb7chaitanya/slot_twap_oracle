@@ -7,11 +7,12 @@ use crate::utils::push_observation;
 
 #[derive(Accounts)]
 pub struct UpdatePrice<'info> {
-    pub authority: Signer<'info>,
+    pub payer: Signer<'info>,
 
     #[account(
         mut,
-        has_one = authority,
+        seeds = [b"oracle", oracle.base_mint.as_ref(), oracle.quote_mint.as_ref()],
+        bump,
     )]
     pub oracle: Account<'info, Oracle>,
 
