@@ -2169,4 +2169,167 @@ mod tests {
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         assert_eq!(oracle.last_price, 1000);
     }
+
+    // ── Resize buffer tests ──
+
+    fn build_resize_buffer_ix(
+        oracle: &Pubkey,
+        owner: &Pubkey,
+        new_capacity: u32,
+    ) -> Instruction {
+        let (obs_pda, _) = observation_buffer_pda(oracle);
+        let data = slot_twap_oracle::instruction::ResizeBuffer { new_capacity }.data();
+
+        Instruction {
+            program_id: program_id(),
+            accounts: vec![
+                AccountMeta::new_readonly(*oracle, false),
+                AccountMeta::new(obs_pda, false),
+                AccountMeta::new(*owner, true),
+                AccountMeta::new_readonly(system_program::id(), false),
+            ],
+            data,
+        }
+    }
+
+    #[test]
+    fn test_resize_buffer_grow() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, 3);
+
+        // Add 2 observations
+        do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &owner, &oracle_pda, 1100, init_slot + 20);
+
+        // Grow from 3 to 10
+        let ix = build_resize_buffer_ix(&oracle_pda, &owner.pubkey(), 10);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
+        let buffer = deserialize_observation_buffer(&svm, &obs_pda);
+        assert_eq!(buffer.capacity, 10);
+        // All observations preserved
+        assert_eq!(buffer.observations.len(), 2);
+        assert_eq!(buffer.observations[0].slot, init_slot + 10);
+        assert_eq!(buffer.observations[1].slot, init_slot + 20);
+    }
+
+    #[test]
+    fn test_resize_buffer_shrink_preserves_newest() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, 5);
+
+        // Fill 4 observations
+        do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &owner, &oracle_pda, 1100, init_slot + 20);
+        do_update_price(&mut svm, &owner, &oracle_pda, 1050, init_slot + 30);
+        do_update_price(&mut svm, &owner, &oracle_pda, 1090, init_slot + 40);
+
+        // Shrink from 5 to 2 — should keep the 2 most recent
+        let ix = build_resize_buffer_ix(&oracle_pda, &owner.pubkey(), 2);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
+        let buffer = deserialize_observation_buffer(&svm, &obs_pda);
+        assert_eq!(buffer.capacity, 2);
+        assert_eq!(buffer.observations.len(), 2);
+        // Most recent 2: slot+30 and slot+40
+        assert_eq!(buffer.observations[0].slot, init_slot + 30);
+        assert_eq!(buffer.observations[1].slot, init_slot + 40);
+    }
+
+    #[test]
+    fn test_resize_buffer_shrink_after_wrap() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, 3);
+
+        // Fill buffer (3) and wrap: 4 updates into capacity-3
+        do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &owner, &oracle_pda, 1100, init_slot + 20);
+        do_update_price(&mut svm, &owner, &oracle_pda, 1050, init_slot + 30);
+        do_update_price(&mut svm, &owner, &oracle_pda, 1090, init_slot + 40); // overwrites slot+10
+
+        // Buffer is wrapped: [slot+40, slot+20, slot+30], head=1
+        // Shrink to 2 — should linearize and keep newest 2: slot+30, slot+40
+        let ix = build_resize_buffer_ix(&oracle_pda, &owner.pubkey(), 2);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
+        let buffer = deserialize_observation_buffer(&svm, &obs_pda);
+        assert_eq!(buffer.capacity, 2);
+        assert_eq!(buffer.observations.len(), 2);
+        assert_eq!(buffer.observations[0].slot, init_slot + 30);
+        assert_eq!(buffer.observations[1].slot, init_slot + 40);
+    }
+
+    #[test]
+    fn test_resize_buffer_zero_capacity_fails() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, _) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        let ix = build_resize_buffer_ix(&oracle_pda, &owner.pubkey(), 0);
+        send_tx_expect_err(&mut svm, &owner, &[ix]);
+    }
+
+    #[test]
+    fn test_resize_buffer_non_owner_fails() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        let attacker = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&attacker.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, _) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        let ix = build_resize_buffer_ix(&oracle_pda, &attacker.pubkey(), 64);
+        send_tx_expect_err(&mut svm, &attacker, &[ix]);
+    }
 }

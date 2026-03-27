@@ -21,3 +21,11 @@ pub struct OraclePauseToggled {
     pub oracle: Pubkey,
     pub paused: bool,
 }
+
+#[event]
+pub struct BufferResized {
+    pub oracle: Pubkey,
+    pub old_capacity: u32,
+    pub new_capacity: u32,
+    pub observations_retained: u32,
+}

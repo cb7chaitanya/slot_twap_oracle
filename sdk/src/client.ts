@@ -104,6 +104,24 @@ export class SlotTwapOracleClient {
       .rpc();
   }
 
+  async resizeBuffer(
+    oracle: PublicKey,
+    newCapacity: number,
+    owner: Signer
+  ): Promise<string> {
+    const [observationBuffer] = this.findObservationBufferPda(oracle);
+
+    return this.program.methods
+      .resizeBuffer(newCapacity)
+      .accounts({
+        oracle,
+        observationBuffer,
+        owner: owner.publicKey,
+      })
+      .signers([owner])
+      .rpc();
+  }
+
   async getSwap(oracle: PublicKey, windowSlots: BN, maxStalenessSlots: BN): Promise<BN> {
     const [observationBuffer] = this.findObservationBufferPda(oracle);
 

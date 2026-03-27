@@ -37,4 +37,8 @@ pub mod slot_twap_oracle {
     pub fn set_paused(ctx: Context<SetPaused>, paused: bool) -> Result<()> {
         instructions::set_paused::handler(ctx, paused)
     }
+
+    pub fn resize_buffer(ctx: Context<ResizeBuffer>, new_capacity: u32) -> Result<()> {
+        instructions::resize_buffer::handler(ctx, new_capacity)
+    }
 }

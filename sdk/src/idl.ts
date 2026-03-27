@@ -107,6 +107,17 @@ export type SlotTwapOracle = {
         { name: "owner"; signer: true }
       ];
       args: [{ name: "paused"; type: "bool" }];
+    },
+    {
+      name: "resizeBuffer";
+      discriminator: [5, 181, 21, 191, 216, 78, 245, 47];
+      accounts: [
+        { name: "oracle" },
+        { name: "observationBuffer"; writable: true },
+        { name: "owner"; writable: true; signer: true },
+        { name: "systemProgram"; address: "11111111111111111111111111111111" }
+      ];
+      args: [{ name: "newCapacity"; type: "u32" }];
     }
   ];
   accounts: [
@@ -116,7 +127,8 @@ export type SlotTwapOracle = {
   events: [
     { name: "oracleUpdate"; discriminator: [237, 176, 133, 150, 0, 131, 48, 15] },
     { name: "ownershipTransferred"; discriminator: [172, 61, 205, 183, 250, 50, 38, 98] },
-    { name: "oraclePauseToggled"; discriminator: [75, 169, 119, 212, 242, 216, 255, 126] }
+    { name: "oraclePauseToggled"; discriminator: [75, 169, 119, 212, 242, 216, 255, 126] },
+    { name: "bufferResized"; discriminator: [75, 2, 113, 158, 66, 247, 160, 58] }
   ];
   errors: [
     { code: 6000; name: "priceOverflow"; msg: "Price overflow detected" },
@@ -198,6 +210,18 @@ export type SlotTwapOracle = {
         fields: [
           { name: "oracle"; type: "pubkey" },
           { name: "paused"; type: "bool" }
+        ];
+      };
+    },
+    {
+      name: "bufferResized";
+      type: {
+        kind: "struct";
+        fields: [
+          { name: "oracle"; type: "pubkey" },
+          { name: "oldCapacity"; type: "u32" },
+          { name: "newCapacity"; type: "u32" },
+          { name: "observationsRetained"; type: "u32" }
         ];
       };
     }
@@ -314,6 +338,17 @@ export const IDL: SlotTwapOracle = {
       ],
       args: [{ name: "paused", type: "bool" }],
     },
+    {
+      name: "resizeBuffer",
+      discriminator: [5, 181, 21, 191, 216, 78, 245, 47],
+      accounts: [
+        { name: "oracle" },
+        { name: "observationBuffer", writable: true },
+        { name: "owner", writable: true, signer: true },
+        { name: "systemProgram", address: "11111111111111111111111111111111" },
+      ],
+      args: [{ name: "newCapacity", type: "u32" }],
+    },
   ],
   accounts: [
     { name: "observationBuffer", discriminator: [251, 96, 31, 90, 232, 132, 250, 134] },
@@ -323,6 +358,7 @@ export const IDL: SlotTwapOracle = {
     { name: "oracleUpdate", discriminator: [237, 176, 133, 150, 0, 131, 48, 15] },
     { name: "ownershipTransferred", discriminator: [172, 61, 205, 183, 250, 50, 38, 98] },
     { name: "oraclePauseToggled", discriminator: [75, 169, 119, 212, 242, 216, 255, 126] },
+    { name: "bufferResized", discriminator: [75, 2, 113, 158, 66, 247, 160, 58] },
   ],
   errors: [
     { code: 6000, name: "priceOverflow", msg: "Price overflow detected" },
@@ -404,6 +440,18 @@ export const IDL: SlotTwapOracle = {
         fields: [
           { name: "oracle", type: "pubkey" },
           { name: "paused", type: "bool" },
+        ],
+      },
+    },
+    {
+      name: "bufferResized",
+      type: {
+        kind: "struct",
+        fields: [
+          { name: "oracle", type: "pubkey" },
+          { name: "oldCapacity", type: "u32" },
+          { name: "newCapacity", type: "u32" },
+          { name: "observationsRetained", type: "u32" },
         ],
       },
     },
