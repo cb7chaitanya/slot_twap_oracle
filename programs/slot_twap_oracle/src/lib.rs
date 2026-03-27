@@ -41,4 +41,8 @@ pub mod slot_twap_oracle {
     pub fn resize_buffer(ctx: Context<ResizeBuffer>, new_capacity: u32) -> Result<()> {
         instructions::resize_buffer::handler(ctx, new_capacity)
     }
+
+    pub fn set_max_deviation(ctx: Context<SetMaxDeviation>, new_max_deviation_bps: u16) -> Result<()> {
+        instructions::set_max_deviation::handler(ctx, new_max_deviation_bps)
+    }
 }

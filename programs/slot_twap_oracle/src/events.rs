@@ -29,3 +29,10 @@ pub struct BufferResized {
     pub new_capacity: u32,
     pub observations_retained: u32,
 }
+
+#[event]
+pub struct DeviationThresholdUpdated {
+    pub oracle: Pubkey,
+    pub old_max_deviation_bps: u16,
+    pub new_max_deviation_bps: u16,
+}

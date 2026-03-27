@@ -118,6 +118,15 @@ export type SlotTwapOracle = {
         { name: "systemProgram"; address: "11111111111111111111111111111111" }
       ];
       args: [{ name: "newCapacity"; type: "u32" }];
+    },
+    {
+      name: "setMaxDeviation";
+      discriminator: [195, 132, 217, 119, 55, 151, 126, 243];
+      accounts: [
+        { name: "oracle"; writable: true },
+        { name: "owner"; signer: true }
+      ];
+      args: [{ name: "newMaxDeviationBps"; type: "u16" }];
     }
   ];
   accounts: [
@@ -128,7 +137,8 @@ export type SlotTwapOracle = {
     { name: "oracleUpdate"; discriminator: [237, 176, 133, 150, 0, 131, 48, 15] },
     { name: "ownershipTransferred"; discriminator: [172, 61, 205, 183, 250, 50, 38, 98] },
     { name: "oraclePauseToggled"; discriminator: [75, 169, 119, 212, 242, 216, 255, 126] },
-    { name: "bufferResized"; discriminator: [75, 2, 113, 158, 66, 247, 160, 58] }
+    { name: "bufferResized"; discriminator: [75, 2, 113, 158, 66, 247, 160, 58] },
+    { name: "deviationThresholdUpdated"; discriminator: [213, 20, 100, 120, 92, 121, 184, 42] }
   ];
   errors: [
     { code: 6000; name: "priceOverflow"; msg: "Price overflow detected" },
@@ -175,7 +185,8 @@ export type SlotTwapOracle = {
           { name: "cumulativePrice"; type: "u128" },
           { name: "lastSlot"; type: "u64" },
           { name: "lastUpdater"; type: "pubkey" },
-          { name: "paused"; type: "bool" }
+          { name: "paused"; type: "bool" },
+          { name: "maxDeviationBps"; type: "u16" }
         ];
       };
     },
@@ -222,6 +233,17 @@ export type SlotTwapOracle = {
           { name: "oldCapacity"; type: "u32" },
           { name: "newCapacity"; type: "u32" },
           { name: "observationsRetained"; type: "u32" }
+        ];
+      };
+    },
+    {
+      name: "deviationThresholdUpdated";
+      type: {
+        kind: "struct";
+        fields: [
+          { name: "oracle"; type: "pubkey" },
+          { name: "oldMaxDeviationBps"; type: "u16" },
+          { name: "newMaxDeviationBps"; type: "u16" }
         ];
       };
     }
@@ -349,6 +371,15 @@ export const IDL: SlotTwapOracle = {
       ],
       args: [{ name: "newCapacity", type: "u32" }],
     },
+    {
+      name: "setMaxDeviation",
+      discriminator: [195, 132, 217, 119, 55, 151, 126, 243],
+      accounts: [
+        { name: "oracle", writable: true },
+        { name: "owner", signer: true },
+      ],
+      args: [{ name: "newMaxDeviationBps", type: "u16" }],
+    },
   ],
   accounts: [
     { name: "observationBuffer", discriminator: [251, 96, 31, 90, 232, 132, 250, 134] },
@@ -359,6 +390,7 @@ export const IDL: SlotTwapOracle = {
     { name: "ownershipTransferred", discriminator: [172, 61, 205, 183, 250, 50, 38, 98] },
     { name: "oraclePauseToggled", discriminator: [75, 169, 119, 212, 242, 216, 255, 126] },
     { name: "bufferResized", discriminator: [75, 2, 113, 158, 66, 247, 160, 58] },
+    { name: "deviationThresholdUpdated", discriminator: [213, 20, 100, 120, 92, 121, 184, 42] },
   ],
   errors: [
     { code: 6000, name: "priceOverflow", msg: "Price overflow detected" },
@@ -406,6 +438,7 @@ export const IDL: SlotTwapOracle = {
           { name: "lastSlot", type: "u64" },
           { name: "lastUpdater", type: "pubkey" },
           { name: "paused", type: "bool" },
+          { name: "maxDeviationBps", type: "u16" },
         ],
       },
     },
@@ -452,6 +485,17 @@ export const IDL: SlotTwapOracle = {
           { name: "oldCapacity", type: "u32" },
           { name: "newCapacity", type: "u32" },
           { name: "observationsRetained", type: "u32" },
+        ],
+      },
+    },
+    {
+      name: "deviationThresholdUpdated",
+      type: {
+        kind: "struct",
+        fields: [
+          { name: "oracle", type: "pubkey" },
+          { name: "oldMaxDeviationBps", type: "u16" },
+          { name: "newMaxDeviationBps", type: "u16" },
         ],
       },
     },

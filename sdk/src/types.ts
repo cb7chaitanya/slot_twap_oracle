@@ -10,6 +10,7 @@ export interface OracleAccount {
   lastSlot: BN;
   lastUpdater: PublicKey;
   paused: boolean;
+  maxDeviationBps: number;
 }
 
 export interface Observation {

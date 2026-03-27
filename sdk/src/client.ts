@@ -104,6 +104,21 @@ export class SlotTwapOracleClient {
       .rpc();
   }
 
+  async setMaxDeviation(
+    oracle: PublicKey,
+    newMaxDeviationBps: number,
+    owner: Signer
+  ): Promise<string> {
+    return this.program.methods
+      .setMaxDeviation(newMaxDeviationBps)
+      .accounts({
+        oracle,
+        owner: owner.publicKey,
+      })
+      .signers([owner])
+      .rpc();
+  }
+
   async resizeBuffer(
     oracle: PublicKey,
     newCapacity: number,

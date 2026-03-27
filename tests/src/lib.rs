@@ -2332,4 +2332,146 @@ mod tests {
         let ix = build_resize_buffer_ix(&oracle_pda, &attacker.pubkey(), 64);
         send_tx_expect_err(&mut svm, &attacker, &[ix]);
     }
+
+    // ── Configurable deviation tests ──
+
+    fn build_set_max_deviation_ix(
+        oracle: &Pubkey,
+        owner: &Pubkey,
+        new_max_deviation_bps: u16,
+    ) -> Instruction {
+        let data = slot_twap_oracle::instruction::SetMaxDeviation { new_max_deviation_bps }.data();
+
+        Instruction {
+            program_id: program_id(),
+            accounts: vec![
+                AccountMeta::new(*oracle, false),
+                AccountMeta::new_readonly(*owner, true),
+            ],
+            data,
+        }
+    }
+
+    #[test]
+    fn test_set_max_deviation() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, _) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Default is 1000 bps (10%)
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.max_deviation_bps, 1000);
+
+        // Set to 500 bps (5%)
+        let ix = build_set_max_deviation_ix(&oracle_pda, &owner.pubkey(), 500);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.max_deviation_bps, 500);
+    }
+
+    #[test]
+    fn test_custom_deviation_enforced() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Set tight threshold: 200 bps (2%)
+        let ix = build_set_max_deviation_ix(&oracle_pda, &owner.pubkey(), 200);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        // First update always passes
+        do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
+
+        // 2% change (1000 → 1020) should succeed
+        do_update_price(&mut svm, &owner, &oracle_pda, 1020, init_slot + 20);
+
+        // 5% change (1020 → 1071) should fail
+        svm.warp_to_slot(init_slot + 30);
+        svm.expire_blockhash();
+        let ix = build_update_price_ix(&owner.pubkey(), &oracle_pda, 1071);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        let result = svm.send_transaction(tx);
+        assert_anchor_error(&result, OracleError::PriceDeviationTooLarge);
+    }
+
+    #[test]
+    fn test_wider_deviation_allows_larger_jumps() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Widen to 5000 bps (50%)
+        let ix = build_set_max_deviation_ix(&oracle_pda, &owner.pubkey(), 5000);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
+
+        // 40% jump (1000 → 1400) — would fail at default 10%, but passes at 50%
+        do_update_price(&mut svm, &owner, &oracle_pda, 1400, init_slot + 20);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 1400);
+    }
+
+    #[test]
+    fn test_set_max_deviation_non_owner_fails() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        let attacker = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&attacker.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, _) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        let ix = build_set_max_deviation_ix(&oracle_pda, &attacker.pubkey(), 5000);
+        send_tx_expect_err(&mut svm, &attacker, &[ix]);
+
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.max_deviation_bps, 1000); // unchanged
+    }
 }
