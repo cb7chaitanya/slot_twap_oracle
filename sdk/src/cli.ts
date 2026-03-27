@@ -57,7 +57,7 @@ program
   .requiredOption("--base-mint <pubkey>", "Base token mint address")
   .requiredOption("--quote-mint <pubkey>", "Quote token mint address")
   .option("--capacity <number>", "Observation buffer capacity", "32")
-  .action(async (opts) => {
+  .action(async (opts: Record<string, string>) => {
     const { rpc, keypair, programId } = program.opts();
     const { client, payer } = makeClient(rpc, keypair, programId);
 
@@ -86,7 +86,7 @@ program
   .description("Submit a price update to an oracle")
   .requiredOption("--oracle <pubkey>", "Oracle PDA address")
   .requiredOption("--price <number>", "New price (integer, scaled)")
-  .action(async (opts) => {
+  .action(async (opts: Record<string, string>) => {
     const { rpc, keypair, programId } = program.opts();
     const { client, payer } = makeClient(rpc, keypair, programId);
 
@@ -111,7 +111,7 @@ program
   .requiredOption("--base-mint <pubkey>", "Base token mint address")
   .requiredOption("--quote-mint <pubkey>", "Quote token mint address")
   .requiredOption("--window <slots>", "Window size in slots")
-  .action(async (opts) => {
+  .action(async (opts: Record<string, string>) => {
     const { rpc, keypair, programId } = program.opts();
     const { client } = makeClient(rpc, keypair, programId);
 
@@ -138,7 +138,7 @@ program
   .option("--tx <signature>", "Transaction signature to parse")
   .option("--oracle <pubkey>", "Oracle address to fetch recent events for")
   .option("--limit <number>", "Number of recent transactions to scan", "20")
-  .action(async (opts) => {
+  .action(async (opts: Record<string, string>) => {
     const { rpc, keypair, programId } = program.opts();
     const { client } = makeClient(rpc, keypair, programId);
 
@@ -181,7 +181,7 @@ program
   .option("--oracle <pubkey>", "Oracle PDA address")
   .option("--base-mint <pubkey>", "Base token mint (derive PDA)")
   .option("--quote-mint <pubkey>", "Quote token mint (derive PDA)")
-  .action(async (opts) => {
+  .action(async (opts: Record<string, string>) => {
     const { rpc, keypair, programId } = program.opts();
     const { client } = makeClient(rpc, keypair, programId);
 
@@ -216,7 +216,7 @@ program
     console.log(`  head:          ${buffer.head}`);
   });
 
-program.parseAsync().catch((err) => {
+program.parseAsync().catch((err: Error) => {
   console.error(`Error: ${err.message}`);
   process.exit(1);
 });
