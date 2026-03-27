@@ -72,11 +72,11 @@ export class SlotTwapOracleClient {
       .rpc();
   }
 
-  async getSwap(oracle: PublicKey, windowSlots: BN): Promise<BN> {
+  async getSwap(oracle: PublicKey, windowSlots: BN, maxStalenessSlots: BN): Promise<BN> {
     const [observationBuffer] = this.findObservationBufferPda(oracle);
 
     const result = await this.program.methods
-      .getSwap(windowSlots)
+      .getSwap(windowSlots, maxStalenessSlots)
       .accounts({
         oracle,
         observationBuffer,

@@ -21,7 +21,7 @@ pub struct GetSwap<'info> {
     pub observation_buffer: Account<'info, ObservationBuffer>,
 }
 
-pub fn handler(ctx: Context<GetSwap>, window_slots: u64) -> Result<u128> {
+pub fn handler(ctx: Context<GetSwap>, window_slots: u64, max_staleness_slots: u64) -> Result<u128> {
     let oracle = &ctx.accounts.oracle;
     let buffer = &ctx.accounts.observation_buffer;
     let clock = Clock::get()?;
@@ -36,6 +36,8 @@ pub fn handler(ctx: Context<GetSwap>, window_slots: u64) -> Result<u128> {
     let slot_delta_since_last = current_slot
         .checked_sub(oracle.last_slot)
         .ok_or(OracleError::PriceOverflow)?;
+
+    require!(slot_delta_since_last <= max_staleness_slots, OracleError::StaleOracle);
 
     let cumulative_now = oracle
         .cumulative_price

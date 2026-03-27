@@ -32,7 +32,10 @@ export type SlotTwapOracle = {
           };
         }
       ];
-      args: [{ name: "windowSlots"; type: "u64" }];
+      args: [
+        { name: "windowSlots"; type: "u64" },
+        { name: "maxStalenessSlots"; type: "u64" }
+      ];
       returns: "u128";
     },
     {
@@ -72,10 +75,7 @@ export type SlotTwapOracle = {
       discriminator: [61, 34, 117, 155, 75, 34, 123, 208];
       accounts: [
         { name: "payer"; signer: true },
-        {
-          name: "oracle";
-          writable: true;
-        },
+        { name: "oracle"; writable: true },
         {
           name: "observationBuffer";
           writable: true;
@@ -96,13 +96,14 @@ export type SlotTwapOracle = {
   ];
   events: [
     { name: "priceUpdated"; discriminator: [154, 72, 87, 150, 246, 230, 23, 217] },
-    { name: "updateSubmitted"; discriminator: [210, 175, 191, 96, 27, 89, 235, 139] }
+    { name: "updateSubmitted"; discriminator: [229, 228, 163, 41, 210, 20, 205, 171] }
   ];
   errors: [
     { code: 6000; name: "priceOverflow"; msg: "Price overflow detected" },
     { code: 6001; name: "staleSlot"; msg: "Stale oracle update — slot has not advanced" },
     { code: 6002; name: "insufficientHistory"; msg: "Not enough observations to compute swap for requested window" },
-    { code: 6003; name: "invalidCapacity"; msg: "Observation buffer capacity must be greater than zero" }
+    { code: 6003; name: "invalidCapacity"; msg: "Observation buffer capacity must be greater than zero" },
+    { code: 6004; name: "staleOracle"; msg: "Oracle data is stale — last update exceeds max staleness threshold" }
   ];
   types: [
     {
@@ -200,7 +201,10 @@ export const IDL: SlotTwapOracle = {
           },
         },
       ],
-      args: [{ name: "windowSlots", type: "u64" }],
+      args: [
+        { name: "windowSlots", type: "u64" },
+        { name: "maxStalenessSlots", type: "u64" },
+      ],
       returns: "u128",
     },
     {
@@ -240,10 +244,7 @@ export const IDL: SlotTwapOracle = {
       discriminator: [61, 34, 117, 155, 75, 34, 123, 208],
       accounts: [
         { name: "payer", signer: true },
-        {
-          name: "oracle",
-          writable: true,
-        },
+        { name: "oracle", writable: true },
         {
           name: "observationBuffer",
           writable: true,
@@ -262,12 +263,16 @@ export const IDL: SlotTwapOracle = {
     { name: "observationBuffer", discriminator: [251, 96, 31, 90, 232, 132, 250, 134] },
     { name: "oracle", discriminator: [139, 194, 131, 179, 140, 179, 229, 244] },
   ],
-  events: [{ name: "priceUpdated", discriminator: [154, 72, 87, 150, 246, 230, 23, 217] }],
+  events: [
+    { name: "priceUpdated", discriminator: [154, 72, 87, 150, 246, 230, 23, 217] },
+    { name: "updateSubmitted", discriminator: [229, 228, 163, 41, 210, 20, 205, 171] },
+  ],
   errors: [
     { code: 6000, name: "priceOverflow", msg: "Price overflow detected" },
     { code: 6001, name: "staleSlot", msg: "Stale oracle update — slot has not advanced" },
     { code: 6002, name: "insufficientHistory", msg: "Not enough observations to compute swap for requested window" },
     { code: 6003, name: "invalidCapacity", msg: "Observation buffer capacity must be greater than zero" },
+    { code: 6004, name: "staleOracle", msg: "Oracle data is stale — last update exceeds max staleness threshold" },
   ],
   types: [
     {
@@ -302,6 +307,7 @@ export const IDL: SlotTwapOracle = {
           { name: "lastPrice", type: "u128" },
           { name: "cumulativePrice", type: "u128" },
           { name: "lastSlot", type: "u64" },
+          { name: "lastUpdater", type: "pubkey" },
         ],
       },
     },
@@ -313,6 +319,17 @@ export const IDL: SlotTwapOracle = {
           { name: "slot", type: "u64" },
           { name: "newPrice", type: "u128" },
           { name: "cumulativePrice", type: "u128" },
+        ],
+      },
+    },
+    {
+      name: "updateSubmitted",
+      type: {
+        kind: "struct",
+        fields: [
+          { name: "updater", type: "pubkey" },
+          { name: "slot", type: "u64" },
+          { name: "price", type: "u128" },
         ],
       },
     },

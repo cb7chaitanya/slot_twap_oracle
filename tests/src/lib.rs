@@ -112,9 +112,9 @@ mod tests {
         }
     }
 
-    fn build_get_swap_ix(oracle: &Pubkey, window_slots: u64) -> Instruction {
+    fn build_get_swap_ix(oracle: &Pubkey, window_slots: u64, max_staleness_slots: u64) -> Instruction {
         let (obs_pda, _) = observation_buffer_pda(oracle);
-        let data = slot_twap_oracle::instruction::GetSwap { window_slots }.data();
+        let data = slot_twap_oracle::instruction::GetSwap { window_slots, max_staleness_slots }.data();
 
         Instruction {
             program_id: program_id(),
@@ -177,13 +177,16 @@ mod tests {
     }
 
     /// Helper: send get_swap and return the u128 result
+    /// Default max staleness used by most tests — large enough to never trigger.
+    const DEFAULT_MAX_STALENESS: u64 = 1_000_000;
+
     fn do_get_swap(
         svm: &mut LiteSVM,
         payer: &Keypair,
         oracle_pda: &Pubkey,
         window_slots: u64,
     ) -> u128 {
-        let ix = build_get_swap_ix(oracle_pda, window_slots);
+        let ix = build_get_swap_ix(oracle_pda, window_slots, DEFAULT_MAX_STALENESS);
         let blockhash = svm.latest_blockhash();
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], blockhash);
@@ -585,7 +588,7 @@ mod tests {
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
         // No updates — buffer is empty, get_swap should fail
-        let ix = build_get_swap_ix(&oracle_pda, 10);
+        let ix = build_get_swap_ix(&oracle_pda, 10, DEFAULT_MAX_STALENESS);
         let blockhash = svm.latest_blockhash();
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
@@ -611,7 +614,7 @@ mod tests {
 
         // Window of 1000 slots is larger than any observation history
         // window_start = (init_slot+20) - 1000 — underflows, returning InsufficientHistory
-        let ix = build_get_swap_ix(&oracle_pda, 1000);
+        let ix = build_get_swap_ix(&oracle_pda, 1000, DEFAULT_MAX_STALENESS);
         let blockhash = svm.latest_blockhash();
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
@@ -638,7 +641,7 @@ mod tests {
 
         // Window of 15 slots: window_start = (init_slot+20) - 15 = init_slot+5
         // No observation exists before init_slot+5+1 = init_slot+6, so InsufficientHistory
-        let ix = build_get_swap_ix(&oracle_pda, 15);
+        let ix = build_get_swap_ix(&oracle_pda, 15, DEFAULT_MAX_STALENESS);
         let blockhash = svm.latest_blockhash();
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
@@ -1721,5 +1724,77 @@ mod tests {
         assert_eq!(price_updated[0].slot, target_slot);
         assert_eq!(price_updated[0].new_price, price);
         assert_eq!(update_submitted[0].updater, payer.pubkey());
+    }
+
+    // ── Staleness protection tests ──
+
+    #[test]
+    fn test_get_swap_fails_when_oracle_is_stale() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Update at init_slot+10
+        do_update_price(&mut svm, &payer, &oracle_pda, 500, init_slot + 10);
+
+        // Warp to init_slot+110 — oracle is now 100 slots stale
+        svm.warp_to_slot(init_slot + 110);
+        svm.expire_blockhash();
+
+        // Request with max_staleness_slots=50 — oracle age (100) exceeds threshold
+        let ix = build_get_swap_ix(&oracle_pda, 20, 50);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        let result = svm.send_transaction(tx);
+        assert_anchor_error(&result, OracleError::StaleOracle);
+    }
+
+    #[test]
+    fn test_get_swap_succeeds_within_staleness_threshold() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Update at init_slot+10
+        do_update_price(&mut svm, &payer, &oracle_pda, 500, init_slot + 10);
+
+        // Warp to init_slot+30 — oracle is 20 slots stale
+        svm.warp_to_slot(init_slot + 30);
+        svm.expire_blockhash();
+
+        // max_staleness_slots=20 — exactly at the boundary, should succeed
+        let ix = build_get_swap_ix(&oracle_pda, 20, 20);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        let meta = svm.send_transaction(tx).expect("get_swap should succeed at boundary");
+        let swap = parse_return_value::<u128>(&meta);
+        // cumulative_now = 0 + 500*20 = 10_000, past obs at slot init_slot+10 (cumul=0)
+        // SWAP = 10_000 / 20 = 500
+        assert_eq!(swap, 500);
+
+        // max_staleness_slots=100 — well within threshold
+        svm.expire_blockhash();
+        let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 20);
+        assert_eq!(swap, 500);
     }
 }

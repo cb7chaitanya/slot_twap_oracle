@@ -13,4 +13,7 @@ pub enum OracleError {
 
     #[msg("Observation buffer capacity must be greater than zero")]
     InvalidCapacity,
+
+    #[msg("Oracle data is stale — last update exceeds max staleness threshold")]
+    StaleOracle,
 }
