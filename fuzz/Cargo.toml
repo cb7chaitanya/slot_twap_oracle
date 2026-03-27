@@ -1,0 +1,31 @@
+[package]
+name = "slot-twap-oracle-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+anchor-lang = "0.31.1"
+slot_twap_oracle = { path = "../programs/slot_twap_oracle", features = ["no-entrypoint"] }
+
+[[bin]]
+name = "fuzz_compute_swap"
+path = "fuzz_targets/compute_swap.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_deviation_check"
+path = "fuzz_targets/deviation_check.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_cumulative_accumulation"
+path = "fuzz_targets/cumulative_accumulation.rs"
+doc = false
+
+[workspace]
