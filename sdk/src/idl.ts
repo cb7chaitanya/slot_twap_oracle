@@ -88,6 +88,16 @@ export type SlotTwapOracle = {
         }
       ];
       args: [{ name: "newPrice"; type: "u128" }];
+    },
+    {
+      name: "transferOwnership";
+      discriminator: [65, 177, 215, 73, 53, 45, 99, 47];
+      accounts: [
+        { name: "oracle"; writable: true },
+        { name: "owner"; signer: true },
+        { name: "newOwner" }
+      ];
+      args: [];
     }
   ];
   accounts: [
@@ -95,7 +105,8 @@ export type SlotTwapOracle = {
     { name: "oracle"; discriminator: [139, 194, 131, 179, 140, 179, 229, 244] }
   ];
   events: [
-    { name: "oracleUpdate"; discriminator: [237, 176, 133, 150, 0, 131, 48, 15] }
+    { name: "oracleUpdate"; discriminator: [237, 176, 133, 150, 0, 131, 48, 15] },
+    { name: "ownershipTransferred"; discriminator: [172, 61, 205, 183, 250, 50, 38, 98] }
   ];
   errors: [
     { code: 6000; name: "priceOverflow"; msg: "Price overflow detected" },
@@ -103,7 +114,8 @@ export type SlotTwapOracle = {
     { code: 6002; name: "insufficientHistory"; msg: "Not enough observations to compute swap for requested window" },
     { code: 6003; name: "invalidCapacity"; msg: "Observation buffer capacity must be greater than zero" },
     { code: 6004; name: "staleOracle"; msg: "Oracle data is stale — last update exceeds max staleness threshold" },
-    { code: 6005; name: "priceDeviationTooLarge"; msg: "Price deviation from last update exceeds maximum allowed threshold" }
+    { code: 6005; name: "priceDeviationTooLarge"; msg: "Price deviation from last update exceeds maximum allowed threshold" },
+    { code: 6006; name: "unauthorized"; msg: "Signer is not the oracle owner" }
   ];
   types: [
     {
@@ -133,6 +145,7 @@ export type SlotTwapOracle = {
       type: {
         kind: "struct";
         fields: [
+          { name: "owner"; type: "pubkey" },
           { name: "baseMint"; type: "pubkey" },
           { name: "quoteMint"; type: "pubkey" },
           { name: "lastPrice"; type: "u128" },
@@ -152,6 +165,17 @@ export type SlotTwapOracle = {
           { name: "cumulativePrice"; type: "u128" },
           { name: "slot"; type: "u64" },
           { name: "updater"; type: "pubkey" }
+        ];
+      };
+    },
+    {
+      name: "ownershipTransferred";
+      type: {
+        kind: "struct";
+        fields: [
+          { name: "oracle"; type: "pubkey" },
+          { name: "previousOwner"; type: "pubkey" },
+          { name: "newOwner"; type: "pubkey" }
         ];
       };
     }
@@ -249,6 +273,16 @@ export const IDL: SlotTwapOracle = {
       ],
       args: [{ name: "newPrice", type: "u128" }],
     },
+    {
+      name: "transferOwnership",
+      discriminator: [65, 177, 215, 73, 53, 45, 99, 47],
+      accounts: [
+        { name: "oracle", writable: true },
+        { name: "owner", signer: true },
+        { name: "newOwner" },
+      ],
+      args: [],
+    },
   ],
   accounts: [
     { name: "observationBuffer", discriminator: [251, 96, 31, 90, 232, 132, 250, 134] },
@@ -256,6 +290,7 @@ export const IDL: SlotTwapOracle = {
   ],
   events: [
     { name: "oracleUpdate", discriminator: [237, 176, 133, 150, 0, 131, 48, 15] },
+    { name: "ownershipTransferred", discriminator: [172, 61, 205, 183, 250, 50, 38, 98] },
   ],
   errors: [
     { code: 6000, name: "priceOverflow", msg: "Price overflow detected" },
@@ -264,6 +299,7 @@ export const IDL: SlotTwapOracle = {
     { code: 6003, name: "invalidCapacity", msg: "Observation buffer capacity must be greater than zero" },
     { code: 6004, name: "staleOracle", msg: "Oracle data is stale — last update exceeds max staleness threshold" },
     { code: 6005, name: "priceDeviationTooLarge", msg: "Price deviation from last update exceeds maximum allowed threshold" },
+    { code: 6006, name: "unauthorized", msg: "Signer is not the oracle owner" },
   ],
   types: [
     {
@@ -293,6 +329,7 @@ export const IDL: SlotTwapOracle = {
       type: {
         kind: "struct",
         fields: [
+          { name: "owner", type: "pubkey" },
           { name: "baseMint", type: "pubkey" },
           { name: "quoteMint", type: "pubkey" },
           { name: "lastPrice", type: "u128" },
@@ -312,6 +349,17 @@ export const IDL: SlotTwapOracle = {
           { name: "cumulativePrice", type: "u128" },
           { name: "slot", type: "u64" },
           { name: "updater", type: "pubkey" },
+        ],
+      },
+    },
+    {
+      name: "ownershipTransferred",
+      type: {
+        kind: "struct",
+        fields: [
+          { name: "oracle", type: "pubkey" },
+          { name: "previousOwner", type: "pubkey" },
+          { name: "newOwner", type: "pubkey" },
         ],
       },
     },

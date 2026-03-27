@@ -2,6 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 
 export interface OracleAccount {
+  owner: PublicKey;
   baseMint: PublicKey;
   quoteMint: PublicKey;
   lastPrice: BN;

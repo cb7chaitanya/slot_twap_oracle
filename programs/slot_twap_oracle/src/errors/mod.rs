@@ -19,4 +19,7 @@ pub enum OracleError {
 
     #[msg("Price deviation from last update exceeds maximum allowed threshold")]
     PriceDeviationTooLarge,
+
+    #[msg("Signer is not the oracle owner")]
+    Unauthorized,
 }

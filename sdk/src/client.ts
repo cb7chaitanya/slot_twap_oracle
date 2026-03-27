@@ -73,6 +73,22 @@ export class SlotTwapOracleClient {
       .rpc();
   }
 
+  async transferOwnership(
+    oracle: PublicKey,
+    newOwner: PublicKey,
+    owner: Signer
+  ): Promise<string> {
+    return this.program.methods
+      .transferOwnership()
+      .accounts({
+        oracle,
+        owner: owner.publicKey,
+        newOwner,
+      })
+      .signers([owner])
+      .rpc();
+  }
+
   async getSwap(oracle: PublicKey, windowSlots: BN, maxStalenessSlots: BN): Promise<BN> {
     const [observationBuffer] = this.findObservationBufferPda(oracle);
 

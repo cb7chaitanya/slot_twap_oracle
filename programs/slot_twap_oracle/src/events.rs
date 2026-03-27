@@ -8,3 +8,10 @@ pub struct OracleUpdate {
     pub slot: u64,
     pub updater: Pubkey,
 }
+
+#[event]
+pub struct OwnershipTransferred {
+    pub oracle: Pubkey,
+    pub previous_owner: Pubkey,
+    pub new_owner: Pubkey,
+}
