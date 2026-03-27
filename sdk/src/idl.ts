@@ -95,8 +95,7 @@ export type SlotTwapOracle = {
     { name: "oracle"; discriminator: [139, 194, 131, 179, 140, 179, 229, 244] }
   ];
   events: [
-    { name: "priceUpdated"; discriminator: [154, 72, 87, 150, 246, 230, 23, 217] },
-    { name: "updateSubmitted"; discriminator: [229, 228, 163, 41, 210, 20, 205, 171] }
+    { name: "oracleUpdate"; discriminator: [237, 176, 133, 150, 0, 131, 48, 15] }
   ];
   errors: [
     { code: 6000; name: "priceOverflow"; msg: "Price overflow detected" },
@@ -144,24 +143,15 @@ export type SlotTwapOracle = {
       };
     },
     {
-      name: "priceUpdated";
+      name: "oracleUpdate";
       type: {
         kind: "struct";
         fields: [
+          { name: "oracle"; type: "pubkey" },
+          { name: "price"; type: "u128" },
+          { name: "cumulativePrice"; type: "u128" },
           { name: "slot"; type: "u64" },
-          { name: "newPrice"; type: "u128" },
-          { name: "cumulativePrice"; type: "u128" }
-        ];
-      };
-    },
-    {
-      name: "updateSubmitted";
-      type: {
-        kind: "struct";
-        fields: [
-          { name: "updater"; type: "pubkey" },
-          { name: "slot"; type: "u64" },
-          { name: "price"; type: "u128" }
+          { name: "updater"; type: "pubkey" }
         ];
       };
     }
@@ -265,8 +255,7 @@ export const IDL: SlotTwapOracle = {
     { name: "oracle", discriminator: [139, 194, 131, 179, 140, 179, 229, 244] },
   ],
   events: [
-    { name: "priceUpdated", discriminator: [154, 72, 87, 150, 246, 230, 23, 217] },
-    { name: "updateSubmitted", discriminator: [229, 228, 163, 41, 210, 20, 205, 171] },
+    { name: "oracleUpdate", discriminator: [237, 176, 133, 150, 0, 131, 48, 15] },
   ],
   errors: [
     { code: 6000, name: "priceOverflow", msg: "Price overflow detected" },
@@ -314,24 +303,15 @@ export const IDL: SlotTwapOracle = {
       },
     },
     {
-      name: "priceUpdated",
+      name: "oracleUpdate",
       type: {
         kind: "struct",
         fields: [
-          { name: "slot", type: "u64" },
-          { name: "newPrice", type: "u128" },
-          { name: "cumulativePrice", type: "u128" },
-        ],
-      },
-    },
-    {
-      name: "updateSubmitted",
-      type: {
-        kind: "struct",
-        fields: [
-          { name: "updater", type: "pubkey" },
-          { name: "slot", type: "u64" },
+          { name: "oracle", type: "pubkey" },
           { name: "price", type: "u128" },
+          { name: "cumulativePrice", type: "u128" },
+          { name: "slot", type: "u64" },
+          { name: "updater", type: "pubkey" },
         ],
       },
     },

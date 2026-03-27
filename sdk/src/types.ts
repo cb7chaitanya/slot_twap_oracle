@@ -22,8 +22,10 @@ export interface ObservationBufferAccount {
   observations: Observation[];
 }
 
-export interface PriceUpdatedEvent {
-  slot: BN;
-  newPrice: BN;
+export interface OracleUpdateEvent {
+  oracle: PublicKey;
+  price: BN;
   cumulativePrice: BN;
+  slot: BN;
+  updater: PublicKey;
 }

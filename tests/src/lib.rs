@@ -22,7 +22,7 @@ mod tests {
     use base64::Engine;
 
     use slot_twap_oracle::errors::OracleError;
-    use slot_twap_oracle::events::{PriceUpdated, UpdateSubmitted};
+    use slot_twap_oracle::events::OracleUpdate;
     use slot_twap_oracle::math::compute_swap;
     use slot_twap_oracle::state::{ObservationBuffer, Oracle};
     use slot_twap_oracle::utils::get_observation_before_slot;
@@ -1649,7 +1649,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_submitted_event_emitted() {
+    fn test_oracle_update_event_emitted() {
         let mut svm = setup();
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
@@ -1666,19 +1666,21 @@ mod tests {
         );
 
         let events = extract_anchor_events(&meta);
-        let submitted: Vec<UpdateSubmitted> = events
+        let updates: Vec<OracleUpdate> = events
             .iter()
-            .filter_map(|e| decode_event::<UpdateSubmitted>(e))
+            .filter_map(|e| decode_event::<OracleUpdate>(e))
             .collect();
 
-        assert_eq!(submitted.len(), 1, "Expected exactly one UpdateSubmitted event");
-        assert_eq!(submitted[0].updater, payer.pubkey());
-        assert_eq!(submitted[0].slot, target_slot);
-        assert_eq!(submitted[0].price, price);
+        assert_eq!(updates.len(), 1, "Expected exactly one OracleUpdate event");
+        assert_eq!(updates[0].oracle, oracle_pda);
+        assert_eq!(updates[0].price, price);
+        assert_eq!(updates[0].cumulative_price, 0); // first update from price=0
+        assert_eq!(updates[0].slot, target_slot);
+        assert_eq!(updates[0].updater, payer.pubkey());
     }
 
     #[test]
-    fn test_price_updated_and_update_submitted_consistent() {
+    fn test_oracle_update_event_fields_consistent_with_state() {
         let mut svm = setup();
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
@@ -1688,34 +1690,30 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        let price = 7_777u128;
-        let target_slot = init_slot + 5;
+        // First update
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+
+        // Second update — event should reflect cumulative state
+        let target_slot = init_slot + 20;
         let meta = do_update_price_with_meta(
-            &mut svm, &payer, &oracle_pda, price, target_slot,
+            &mut svm, &payer, &oracle_pda, 1100, target_slot,
         );
 
         let events = extract_anchor_events(&meta);
-
-        let price_updated: Vec<PriceUpdated> = events
+        let updates: Vec<OracleUpdate> = events
             .iter()
-            .filter_map(|e| decode_event::<PriceUpdated>(e))
-            .collect();
-        let update_submitted: Vec<UpdateSubmitted> = events
-            .iter()
-            .filter_map(|e| decode_event::<UpdateSubmitted>(e))
+            .filter_map(|e| decode_event::<OracleUpdate>(e))
             .collect();
 
-        assert_eq!(price_updated.len(), 1);
-        assert_eq!(update_submitted.len(), 1);
+        assert_eq!(updates.len(), 1);
 
-        // Both events report the same slot and price
-        assert_eq!(price_updated[0].slot, update_submitted[0].slot);
-        assert_eq!(price_updated[0].new_price, update_submitted[0].price);
-
-        // Values match what we sent
-        assert_eq!(price_updated[0].slot, target_slot);
-        assert_eq!(price_updated[0].new_price, price);
-        assert_eq!(update_submitted[0].updater, payer.pubkey());
+        // Verify event matches on-chain state
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(updates[0].oracle, oracle_pda);
+        assert_eq!(updates[0].price, oracle.last_price);
+        assert_eq!(updates[0].cumulative_price, oracle.cumulative_price);
+        assert_eq!(updates[0].slot, target_slot);
+        assert_eq!(updates[0].updater, payer.pubkey());
     }
 
     // ── Staleness protection tests ──

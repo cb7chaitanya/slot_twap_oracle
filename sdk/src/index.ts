@@ -4,7 +4,7 @@ export {
   OracleAccount,
   ObservationBufferAccount,
   Observation,
-  PriceUpdatedEvent,
+  OracleUpdateEvent,
 } from "./types";
 export { IDL } from "./idl";
 export type { SlotTwapOracle } from "./idl";
