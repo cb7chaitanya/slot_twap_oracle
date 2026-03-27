@@ -19,7 +19,15 @@ import {
   SlotTwapOracleClient,
   PROGRAM_ID,
   OracleUpdateEvent,
+  findRewardVaultPda,
+  findVaultTokenAccountPda,
 } from "@slot-twap-oracle/sdk";
+import {
+  createInitializeAccountInstruction,
+  createMintToInstruction,
+  getAccount,
+  ACCOUNT_SIZE,
+} from "@solana/spl-token";
 
 const RPC_URL = "http://127.0.0.1:8899";
 const PROGRAM_SO = "target/deploy/slot_twap_oracle.so";
@@ -405,6 +413,186 @@ describe("Slot TWAP Oracle SDK", function () {
     it("handles empty log array", () => {
       const events = SlotTwapOracleClient.decodeOracleUpdateLogs([]);
       expect(events).to.have.lengthOf(0);
+    });
+  });
+
+  // ── Reward vault ──
+
+  describe("reward vault", () => {
+    let rewardMint: PublicKey;
+    let rewardOraclePda: PublicKey;
+    let ownerTokenAccount: PublicKey;
+    const REWARD_PER_UPDATE = new BN(1_000_000);
+
+    async function createTokenAccount(
+      owner: PublicKey,
+      mint: PublicKey
+    ): Promise<PublicKey> {
+      const account = Keypair.generate();
+      const rent = await conn.getMinimumBalanceForRentExemption(ACCOUNT_SIZE);
+      const tx = new Transaction().add(
+        SystemProgram.createAccount({
+          fromPubkey: payer.publicKey,
+          newAccountPubkey: account.publicKey,
+          space: ACCOUNT_SIZE,
+          lamports: rent,
+          programId: TOKEN_2022_PROGRAM_ID,
+        }),
+        createInitializeAccountInstruction(
+          account.publicKey,
+          mint,
+          owner,
+          TOKEN_2022_PROGRAM_ID
+        )
+      );
+      await sendAndConfirmTransaction(conn, tx, [payer, account]);
+      return account.publicKey;
+    }
+
+    async function mintTokens(
+      mint: PublicKey,
+      dest: PublicKey,
+      amount: number
+    ): Promise<void> {
+      const tx = new Transaction().add(
+        createMintToInstruction(
+          mint, dest, payer.publicKey, amount, [], TOKEN_2022_PROGRAM_ID
+        )
+      );
+      await sendAndConfirmTransaction(conn, tx, [payer]);
+    }
+
+    before(async () => {
+      // Create a separate oracle for reward tests
+      const rBase = await createMint(conn, payer);
+      const rQuote = await createMint(conn, payer);
+      rewardMint = await createMint(conn, payer);
+
+      await client.initializeOracle(rBase, rQuote, 8, payer);
+      [rewardOraclePda] = client.findOraclePda(rBase, rQuote);
+
+      // Create and fund owner token account
+      ownerTokenAccount = await createTokenAccount(payer.publicKey, rewardMint);
+      await mintTokens(rewardMint, ownerTokenAccount, 50_000_000);
+    });
+
+    it("initializes reward vault with correct state", async () => {
+      const sig = await client.initializeRewardVault(
+        rewardOraclePda, rewardMint, REWARD_PER_UPDATE, payer
+      );
+      expect(sig).to.be.a("string");
+
+      const [vaultPda] = client.findRewardVaultPda(rewardOraclePda);
+      const [vaultTokenPda] = client.findVaultTokenAccountPda(rewardOraclePda);
+
+      // Verify vault token account exists with correct mint
+      const vaultToken = await getAccount(conn, vaultTokenPda, "confirmed", TOKEN_2022_PROGRAM_ID);
+      expect(vaultToken.mint.toBase58()).to.equal(rewardMint.toBase58());
+      expect(vaultToken.owner.toBase58()).to.equal(vaultPda.toBase58());
+      expect(Number(vaultToken.amount)).to.equal(0);
+    });
+
+    it("funds the reward vault", async () => {
+      const fundAmount = new BN(10_000_000);
+      const sig = await client.fundRewardVault(
+        rewardOraclePda, rewardMint, ownerTokenAccount, fundAmount, payer
+      );
+      expect(sig).to.be.a("string");
+
+      const [vaultTokenPda] = client.findVaultTokenAccountPda(rewardOraclePda);
+      const vaultToken = await getAccount(conn, vaultTokenPda, "confirmed", TOKEN_2022_PROGRAM_ID);
+      expect(Number(vaultToken.amount)).to.equal(10_000_000);
+    });
+
+    it("allows last_updater to claim reward", async () => {
+      // Update price so payer becomes last_updater
+      await waitForNextSlot(conn);
+      await client.updatePrice(rewardOraclePda, new BN(1_000_000_000), payer);
+
+      const oracle = await client.fetchOracle(rewardOraclePda);
+      expect(oracle.lastUpdater.toBase58()).to.equal(payer.publicKey.toBase58());
+
+      // Create a separate token account for receiving reward
+      const claimAccount = await createTokenAccount(payer.publicKey, rewardMint);
+
+      const sig = await client.claimReward(
+        rewardOraclePda, rewardMint, claimAccount, payer
+      );
+      expect(sig).to.be.a("string");
+
+      // Verify reward received
+      const claimed = await getAccount(conn, claimAccount, "confirmed", TOKEN_2022_PROGRAM_ID);
+      expect(Number(claimed.amount)).to.equal(REWARD_PER_UPDATE.toNumber());
+
+      // Verify vault balance decreased
+      const [vaultTokenPda] = client.findVaultTokenAccountPda(rewardOraclePda);
+      const vaultToken = await getAccount(conn, vaultTokenPda, "confirmed", TOKEN_2022_PROGRAM_ID);
+      expect(Number(vaultToken.amount)).to.equal(10_000_000 - REWARD_PER_UPDATE.toNumber());
+    });
+
+    it("rejects claim from non-last-updater", async () => {
+      const attacker = Keypair.generate();
+      await airdrop(conn, attacker.publicKey, 2);
+      const attackerAta = await createTokenAccount(attacker.publicKey, rewardMint);
+
+      try {
+        await client.claimReward(
+          rewardOraclePda, rewardMint, attackerAta, attacker
+        );
+        expect.fail("Should have thrown Unauthorized");
+      } catch (err) {
+        expect((err as Error).message).to.include("Unauthorized");
+      }
+
+      const ata = await getAccount(conn, attackerAta, "confirmed", TOKEN_2022_PROGRAM_ID);
+      expect(Number(ata.amount)).to.equal(0);
+    });
+
+    it("different updater claims after new update", async () => {
+      const updater2 = Keypair.generate();
+      await airdrop(conn, updater2.publicKey, 2);
+      const updater2Ata = await createTokenAccount(updater2.publicKey, rewardMint);
+
+      // updater2 updates price
+      await waitForNextSlot(conn);
+      await client.updatePrice(rewardOraclePda, new BN(1_050_000_000), updater2);
+
+      const oracle = await client.fetchOracle(rewardOraclePda);
+      expect(oracle.lastUpdater.toBase58()).to.equal(updater2.publicKey.toBase58());
+
+      // updater2 claims
+      const sig = await client.claimReward(
+        rewardOraclePda, rewardMint, updater2Ata, updater2
+      );
+      expect(sig).to.be.a("string");
+
+      const ata = await getAccount(conn, updater2Ata, "confirmed", TOKEN_2022_PROGRAM_ID);
+      expect(Number(ata.amount)).to.equal(REWARD_PER_UPDATE.toNumber());
+    });
+
+    it("rejects claim when vault is empty", async () => {
+      // Create a fresh oracle with an empty vault
+      const emptyBase = await createMint(conn, payer);
+      const emptyQuote = await createMint(conn, payer);
+      await client.initializeOracle(emptyBase, emptyQuote, 4, payer);
+      const [emptyOracle] = client.findOraclePda(emptyBase, emptyQuote);
+
+      await client.initializeRewardVault(
+        emptyOracle, rewardMint, REWARD_PER_UPDATE, payer
+      );
+      // Don't fund it
+
+      await waitForNextSlot(conn);
+      await client.updatePrice(emptyOracle, new BN(1_000_000_000), payer);
+
+      const claimAta = await createTokenAccount(payer.publicKey, rewardMint);
+
+      try {
+        await client.claimReward(emptyOracle, rewardMint, claimAta, payer);
+        expect.fail("Should have thrown InsufficientRewardBalance");
+      } catch (err) {
+        expect((err as Error).message).to.include("InsufficientRewardBalance");
+      }
     });
   });
 });

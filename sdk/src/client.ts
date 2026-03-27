@@ -1,5 +1,5 @@
 import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
-import { PublicKey, Signer } from "@solana/web3.js";
+import { PublicKey, Signer, SystemProgram } from "@solana/web3.js";
 import { IDL, SlotTwapOracle } from "./idl";
 import {
   findOraclePda,
@@ -157,7 +157,8 @@ export class SlotTwapOracleClient {
     oracle: PublicKey,
     rewardMint: PublicKey,
     rewardPerUpdate: BN,
-    owner: Signer
+    owner: Signer,
+    tokenProgramId: PublicKey = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
   ): Promise<string> {
     const [rewardVault] = this.findRewardVaultPda(oracle);
     const [vaultTokenAccount] = this.findVaultTokenAccountPda(oracle);
@@ -170,6 +171,8 @@ export class SlotTwapOracleClient {
         vaultTokenAccount,
         rewardMint,
         owner: owner.publicKey,
+        tokenProgram: tokenProgramId,
+        systemProgram: SystemProgram.programId,
       })
       .signers([owner])
       .rpc();
@@ -180,7 +183,8 @@ export class SlotTwapOracleClient {
     rewardMint: PublicKey,
     funderTokenAccount: PublicKey,
     amount: BN,
-    funder: Signer
+    funder: Signer,
+    tokenProgramId: PublicKey = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
   ): Promise<string> {
     const [rewardVault] = this.findRewardVaultPda(oracle);
     const [vaultTokenAccount] = this.findVaultTokenAccountPda(oracle);
@@ -194,6 +198,7 @@ export class SlotTwapOracleClient {
         rewardMint,
         funderTokenAccount,
         funder: funder.publicKey,
+        tokenProgram: tokenProgramId,
       })
       .signers([funder])
       .rpc();
@@ -203,7 +208,8 @@ export class SlotTwapOracleClient {
     oracle: PublicKey,
     rewardMint: PublicKey,
     updaterTokenAccount: PublicKey,
-    updater: Signer
+    updater: Signer,
+    tokenProgramId: PublicKey = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
   ): Promise<string> {
     const [rewardVault] = this.findRewardVaultPda(oracle);
     const [vaultTokenAccount] = this.findVaultTokenAccountPda(oracle);
@@ -217,6 +223,7 @@ export class SlotTwapOracleClient {
         rewardMint,
         updaterTokenAccount,
         updater: updater.publicKey,
+        tokenProgram: tokenProgramId,
       })
       .signers([updater])
       .rpc();
