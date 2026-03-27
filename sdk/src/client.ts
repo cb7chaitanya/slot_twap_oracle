@@ -1,7 +1,13 @@
 import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
 import { PublicKey, Signer } from "@solana/web3.js";
 import { IDL, SlotTwapOracle } from "./idl";
-import { findOraclePda, findObservationBufferPda, PROGRAM_ID } from "./pda";
+import {
+  findOraclePda,
+  findObservationBufferPda,
+  findRewardVaultPda,
+  findVaultTokenAccountPda,
+  PROGRAM_ID,
+} from "./pda";
 import {
   OracleAccount,
   ObservationBufferAccount,
@@ -37,6 +43,14 @@ export class SlotTwapOracleClient {
 
   findObservationBufferPda(oracle: PublicKey): [PublicKey, number] {
     return findObservationBufferPda(oracle, this.programId);
+  }
+
+  findRewardVaultPda(oracle: PublicKey): [PublicKey, number] {
+    return findRewardVaultPda(oracle, this.programId);
+  }
+
+  findVaultTokenAccountPda(oracle: PublicKey): [PublicKey, number] {
+    return findVaultTokenAccountPda(oracle, this.programId);
   }
 
   // ── Instructions ──
@@ -134,6 +148,77 @@ export class SlotTwapOracleClient {
         owner: owner.publicKey,
       })
       .signers([owner])
+      .rpc();
+  }
+
+  // ── Reward vault instructions ──
+
+  async initializeRewardVault(
+    oracle: PublicKey,
+    rewardMint: PublicKey,
+    rewardPerUpdate: BN,
+    owner: Signer
+  ): Promise<string> {
+    const [rewardVault] = this.findRewardVaultPda(oracle);
+    const [vaultTokenAccount] = this.findVaultTokenAccountPda(oracle);
+
+    return this.program.methods
+      .initializeRewardVault(rewardPerUpdate)
+      .accounts({
+        oracle,
+        rewardVault,
+        vaultTokenAccount,
+        rewardMint,
+        owner: owner.publicKey,
+      })
+      .signers([owner])
+      .rpc();
+  }
+
+  async fundRewardVault(
+    oracle: PublicKey,
+    rewardMint: PublicKey,
+    funderTokenAccount: PublicKey,
+    amount: BN,
+    funder: Signer
+  ): Promise<string> {
+    const [rewardVault] = this.findRewardVaultPda(oracle);
+    const [vaultTokenAccount] = this.findVaultTokenAccountPda(oracle);
+
+    return this.program.methods
+      .fundRewardVault(amount)
+      .accounts({
+        oracle,
+        rewardVault,
+        vaultTokenAccount,
+        rewardMint,
+        funderTokenAccount,
+        funder: funder.publicKey,
+      })
+      .signers([funder])
+      .rpc();
+  }
+
+  async claimReward(
+    oracle: PublicKey,
+    rewardMint: PublicKey,
+    updaterTokenAccount: PublicKey,
+    updater: Signer
+  ): Promise<string> {
+    const [rewardVault] = this.findRewardVaultPda(oracle);
+    const [vaultTokenAccount] = this.findVaultTokenAccountPda(oracle);
+
+    return this.program.methods
+      .claimReward()
+      .accounts({
+        oracle,
+        rewardVault,
+        vaultTokenAccount,
+        rewardMint,
+        updaterTokenAccount,
+        updater: updater.publicKey,
+      })
+      .signers([updater])
       .rpc();
   }
 

@@ -1,5 +1,11 @@
 export { SlotTwapOracleClient } from "./client";
-export { findOraclePda, findObservationBufferPda, PROGRAM_ID } from "./pda";
+export {
+  findOraclePda,
+  findObservationBufferPda,
+  findRewardVaultPda,
+  findVaultTokenAccountPda,
+  PROGRAM_ID,
+} from "./pda";
 export {
   OracleAccount,
   ObservationBufferAccount,

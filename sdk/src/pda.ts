@@ -40,3 +40,23 @@ export function findObservationBufferPda(
     programId
   );
 }
+
+export function findRewardVaultPda(
+  oracle: PublicKey,
+  programId: PublicKey = PROGRAM_ID
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("reward"), oracle.toBuffer()],
+    programId
+  );
+}
+
+export function findVaultTokenAccountPda(
+  oracle: PublicKey,
+  programId: PublicKey = PROGRAM_ID
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("reward_tokens"), oracle.toBuffer()],
+    programId
+  );
+}
