@@ -219,12 +219,18 @@ export class SlotTwapOracleClient {
   /**
    * Compute TWAP for a pair over a window, fetching state on-chain.
    * Extends cumulative price to the current slot like get_swap does.
+   *
+   * @param maxStalenessSlots - Maximum allowed slots since last update.
+   *   Defaults to `windowSlots` (oracle must have been updated within the window).
    */
   async computeSwapFromChain(
     baseMint: PublicKey,
     quoteMint: PublicKey,
-    windowSlots: number
+    windowSlots: number,
+    maxStalenessSlots?: number
   ): Promise<BN> {
+    const staleness = maxStalenessSlots ?? windowSlots;
+
     const [oraclePda] = this.findOraclePda(baseMint, quoteMint);
     const [bufferPda] = this.findObservationBufferPda(oraclePda);
 
@@ -236,6 +242,14 @@ export class SlotTwapOracleClient {
 
     const currentSlot = new BN(slot);
     const slotDeltaSinceLast = currentSlot.sub(oracle.lastSlot);
+
+    if (slotDeltaSinceLast.gtn(staleness)) {
+      throw new Error(
+        `Oracle is stale: last update ${slotDeltaSinceLast.toString()} slots ago, ` +
+          `max allowed ${staleness}`
+      );
+    }
+
     const cumulativeNow = oracle.cumulativePrice.add(
       oracle.lastPrice.mul(slotDeltaSinceLast)
     );

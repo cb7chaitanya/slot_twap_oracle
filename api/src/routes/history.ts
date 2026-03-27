@@ -15,7 +15,7 @@ router.get("/", validateQuery(historyQuery), async (_req: Request, res: Response
     res.json({
       oracle,
       count: events.length,
-      updates: events.map((e) => ({
+      updates: events.map((e: any) => ({
         oracle: e.oracle.toBase58(),
         price: e.price.toString(),
         cumulativePrice: e.cumulativePrice.toString(),
