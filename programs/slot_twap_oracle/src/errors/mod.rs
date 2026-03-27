@@ -25,4 +25,7 @@ pub enum OracleError {
 
     #[msg("Oracle is paused")]
     OraclePaused,
+
+    #[msg("Reward vault has insufficient balance")]
+    InsufficientRewardBalance,
 }

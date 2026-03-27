@@ -1,13 +1,19 @@
+pub mod claim_reward;
+pub mod fund_reward_vault;
 pub mod get_swap;
 pub mod initialize_oracle;
+pub mod initialize_reward_vault;
 pub mod resize_buffer;
 pub mod set_max_deviation;
 pub mod set_paused;
 pub mod transfer_ownership;
 pub mod update_price;
 
+pub use claim_reward::*;
+pub use fund_reward_vault::*;
 pub use get_swap::*;
 pub use initialize_oracle::*;
+pub use initialize_reward_vault::*;
 pub use resize_buffer::*;
 pub use set_max_deviation::*;
 pub use set_paused::*;

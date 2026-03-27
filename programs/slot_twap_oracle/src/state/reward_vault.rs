@@ -1,0 +1,13 @@
+use anchor_lang::prelude::*;
+
+/// Per-oracle reward configuration and accounting.
+/// PDA seeds: ["reward", oracle.key()]
+#[account]
+#[derive(InitSpace)]
+pub struct RewardVault {
+    pub oracle: Pubkey,
+    pub reward_mint: Pubkey,
+    pub reward_per_update: u64,
+    pub total_distributed: u64,
+    pub total_updates_rewarded: u64,
+}

@@ -45,4 +45,16 @@ pub mod slot_twap_oracle {
     pub fn set_max_deviation(ctx: Context<SetMaxDeviation>, new_max_deviation_bps: u16) -> Result<()> {
         instructions::set_max_deviation::handler(ctx, new_max_deviation_bps)
     }
+
+    pub fn initialize_reward_vault(ctx: Context<InitializeRewardVault>, reward_per_update: u64) -> Result<()> {
+        instructions::initialize_reward_vault::handler(ctx, reward_per_update)
+    }
+
+    pub fn fund_reward_vault(ctx: Context<FundRewardVault>, amount: u64) -> Result<()> {
+        instructions::fund_reward_vault::handler(ctx, amount)
+    }
+
+    pub fn claim_reward(ctx: Context<ClaimReward>) -> Result<()> {
+        instructions::claim_reward::handler(ctx)
+    }
 }

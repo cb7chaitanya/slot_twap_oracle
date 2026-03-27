@@ -36,3 +36,11 @@ pub struct DeviationThresholdUpdated {
     pub old_max_deviation_bps: u16,
     pub new_max_deviation_bps: u16,
 }
+
+#[event]
+pub struct RewardClaimed {
+    pub oracle: Pubkey,
+    pub updater: Pubkey,
+    pub amount: u64,
+    pub total_distributed: u64,
+}
