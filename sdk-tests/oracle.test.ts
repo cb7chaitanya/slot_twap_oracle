@@ -136,7 +136,8 @@ describe("Slot TWAP Oracle SDK", function () {
       const buffer = await client.fetchObservationBuffer(bufferPda);
 
       expect(buffer.capacity).to.equal(32);
-      expect(buffer.observations).to.have.lengthOf(0);
+      expect(buffer.len).to.equal(0);
+      expect(buffer.observations).to.have.lengthOf(32); // pre-allocated
     });
 
     it("rejects duplicate initialization", async () => {
