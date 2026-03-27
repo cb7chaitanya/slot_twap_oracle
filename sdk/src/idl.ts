@@ -103,7 +103,8 @@ export type SlotTwapOracle = {
     { code: 6001; name: "staleSlot"; msg: "Stale oracle update — slot has not advanced" },
     { code: 6002; name: "insufficientHistory"; msg: "Not enough observations to compute swap for requested window" },
     { code: 6003; name: "invalidCapacity"; msg: "Observation buffer capacity must be greater than zero" },
-    { code: 6004; name: "staleOracle"; msg: "Oracle data is stale — last update exceeds max staleness threshold" }
+    { code: 6004; name: "staleOracle"; msg: "Oracle data is stale — last update exceeds max staleness threshold" },
+    { code: 6005; name: "priceDeviationTooLarge"; msg: "Price deviation from last update exceeds maximum allowed threshold" }
   ];
   types: [
     {
@@ -273,6 +274,7 @@ export const IDL: SlotTwapOracle = {
     { code: 6002, name: "insufficientHistory", msg: "Not enough observations to compute swap for requested window" },
     { code: 6003, name: "invalidCapacity", msg: "Observation buffer capacity must be greater than zero" },
     { code: 6004, name: "staleOracle", msg: "Oracle data is stale — last update exceeds max staleness threshold" },
+    { code: 6005, name: "priceDeviationTooLarge", msg: "Price deviation from last update exceeds maximum allowed threshold" },
   ],
   types: [
     {

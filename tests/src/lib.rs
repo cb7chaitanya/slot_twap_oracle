@@ -296,23 +296,23 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        // First update: set price to 500, after 10 slots
-        do_update_price(&mut svm, &payer, &oracle_pda, 500, init_slot + 10);
+        // First update: set price to 1000, after 10 slots
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         assert_eq!(oracle.cumulative_price, 0);
-        assert_eq!(oracle.last_price, 500);
-
-        // Second update: set price to 1000, after 20 more slots
-        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 30);
-        let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.cumulative_price, 10_000);
         assert_eq!(oracle.last_price, 1000);
 
-        // Third update: set price to 2000, after 5 more slots
-        do_update_price(&mut svm, &payer, &oracle_pda, 2000, init_slot + 35);
+        // Second update: set price to 1100 (+10%), after 20 more slots
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 30);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.cumulative_price, 15_000);
-        assert_eq!(oracle.last_price, 2000);
+        assert_eq!(oracle.cumulative_price, 20_000); // 1000 * 20
+        assert_eq!(oracle.last_price, 1100);
+
+        // Third update: set price to 1050 (-4.5%), after 5 more slots
+        do_update_price(&mut svm, &payer, &oracle_pda, 1050, init_slot + 35);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.cumulative_price, 25_500); // 20000 + 1100*5
+        assert_eq!(oracle.last_price, 1050);
         assert_eq!(oracle.last_slot, init_slot + 35);
 
         // Verify observations were stored
@@ -334,9 +334,9 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 5);
-        do_update_price(&mut svm, &payer, &oracle_pda, 200, init_slot + 15);
-        do_update_price(&mut svm, &payer, &oracle_pda, 300, init_slot + 25);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 5);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 15);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1050, init_slot + 25);
 
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
@@ -345,9 +345,9 @@ mod tests {
         assert_eq!(buffer.observations[0].slot, init_slot + 5);
         assert_eq!(buffer.observations[0].cumulative_price, 0); // 0 * 5
         assert_eq!(buffer.observations[1].slot, init_slot + 15);
-        assert_eq!(buffer.observations[1].cumulative_price, 1_000); // 0 + 100*10
+        assert_eq!(buffer.observations[1].cumulative_price, 10_000); // 0 + 1000*10
         assert_eq!(buffer.observations[2].slot, init_slot + 25);
-        assert_eq!(buffer.observations[2].cumulative_price, 3_000); // 1_000 + 200*10
+        assert_eq!(buffer.observations[2].cumulative_price, 21_000); // 10_000 + 1100*10
         assert_eq!(buffer.head, 3);
     }
 
@@ -364,9 +364,9 @@ mod tests {
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, capacity);
 
         // Fill the buffer (3 updates = capacity)
-        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
-        do_update_price(&mut svm, &payer, &oracle_pda, 200, init_slot + 20);
-        do_update_price(&mut svm, &payer, &oracle_pda, 300, init_slot + 30);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1050, init_slot + 30);
 
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
@@ -374,7 +374,7 @@ mod tests {
         assert_eq!(buffer.head, 0); // wrapped around
 
         // 4th update should overwrite index 0
-        do_update_price(&mut svm, &payer, &oracle_pda, 400, init_slot + 40);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1090, init_slot + 40);
 
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
         assert_eq!(buffer.observations.len(), 3); // still 3
@@ -397,9 +397,9 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
-        do_update_price(&mut svm, &payer, &oracle_pda, 200, init_slot + 20);
-        do_update_price(&mut svm, &payer, &oracle_pda, 300, init_slot + 30);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1050, init_slot + 30);
 
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
@@ -457,12 +457,13 @@ mod tests {
         let snap_slot_past = init_slot;
         let snap_cumulative_past = 0u128;
 
-        do_update_price(&mut svm, &payer, &oracle_pda, 200, init_slot + 10);
-        do_update_price(&mut svm, &payer, &oracle_pda, 800, init_slot + 20);
-        do_update_price(&mut svm, &payer, &oracle_pda, 600, init_slot + 40);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1050, init_slot + 40);
 
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.cumulative_price, 18_000);
+        // cumul = 0 + 1000*10 + 1100*20 = 32000
+        assert_eq!(oracle.cumulative_price, 32_000);
 
         let swap = compute_swap(
             oracle.cumulative_price,
@@ -471,7 +472,8 @@ mod tests {
             snap_slot_past,
         )
         .unwrap();
-        assert_eq!(swap, 450);
+        // 32000 / (init_slot+40 - init_slot) = 32000/40 = 800
+        assert_eq!(swap, 800);
     }
 
     #[test]
@@ -485,9 +487,9 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
-        do_update_price(&mut svm, &payer, &oracle_pda, 300, init_slot + 20);
-        do_update_price(&mut svm, &payer, &oracle_pda, 500, init_slot + 30);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1050, init_slot + 30);
 
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
@@ -495,7 +497,7 @@ mod tests {
 
         // Compute SWAP between observation at slot+10 and current state at slot+30
         // obs at slot+10: cumulative=0
-        // current: cumulative = 0 + 100*10 + 300*10 = 4000, slot=init+30
+        // current: cumulative = 0 + 1000*10 + 1100*10 = 21000, slot=init+30
         let past_obs = get_observation_before_slot(&buffer, init_slot + 15).unwrap();
         assert_eq!(past_obs.slot, init_slot + 10);
 
@@ -506,8 +508,8 @@ mod tests {
             past_obs.slot,
         )
         .unwrap();
-        // (4000 - 0) / (30 - 10) = 200
-        assert_eq!(swap, 200);
+        // (21000 - 0) / (30 - 10) = 1050
+        assert_eq!(swap, 1050);
     }
 
     // ── get_swap instruction tests ──
@@ -523,31 +525,22 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        // Price=500 for 20 slots, then price=1000 for 10 slots
-        do_update_price(&mut svm, &payer, &oracle_pda, 500, init_slot + 10);
-        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 30);
+        // Price=1000 for 20 slots, then price=1100 for 10 slots
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 30);
 
         // Warp to slot+40 so there's elapsed time since last update
-        // At slot+40: cumulative = 0 + 500*20 + 1000*10 = 20_000 (on-chain)
-        // get_swap extends: cumulative_now = 20_000 + 1000*10 = 30_000 (live at slot+50? no)
-        // Actually let's stay at slot+30 for simplicity — call get_swap immediately
-        // cumulative on-chain = 10_000, slot_delta_since_last = 0
-        // So cumulative_now = 10_000 + 1000*0 = 10_000
-        // Window of 20 slots: window_start = 30-20 = 10
-        // Past obs: observation at slot init_slot+10 (slot < 11), cumulative=0
-        // SWAP = (10_000 - 0) / (30 - (init_slot+10))... wait, slots are absolute
-
-        // Let me just warp forward and test clearly
         svm.warp_to_slot(init_slot + 40);
         svm.expire_blockhash();
 
         // At slot init_slot+40:
-        // cumulative_now = 10_000 + 1000*(40-30) = 20_000
+        // on-chain cumul = 0 + 1000*20 = 20_000
+        // cumulative_now = 20_000 + 1100*(40-30) = 31_000
         // window_slots=30 → window_start = (init_slot+40) - 30 = init_slot+10
         // Past obs: need slot <= init_slot+10 → observation at init_slot+10, cumulative=0
-        // SWAP = (20_000 - 0) / (init_slot+40 - init_slot-10) = 20_000/30 = 666
+        // SWAP = (31_000 - 0) / (init_slot+40 - init_slot-10) = 31_000/30 = 1033
         let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 30);
-        assert_eq!(swap, 666);
+        assert_eq!(swap, 1033);
     }
 
     #[test]
@@ -688,7 +681,7 @@ mod tests {
 
     #[test]
     fn test_update_price_cumulative_math_three_updates() {
-        // Simulate: slot 100 price 10, slot 110 price 20, slot 120 price 15
+        // Simulate: slot 100 price 1000, slot 110 price 1100, slot 120 price 1050
         let mut svm = setup();
         let payer = Keypair::new();
         svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
@@ -709,31 +702,31 @@ mod tests {
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         assert_eq!(oracle.last_slot, 90);
 
-        // Slot 100: set price=10
+        // Slot 100: set price=1000
         // slot_delta = 100 - 90 = 10, weighted = 0 * 10 = 0
-        // cumulative = 0 + 0 = 0, last_price = 10, last_slot = 100
-        do_update_price(&mut svm, &payer, &oracle_pda, 10, 100);
+        // cumulative = 0 + 0 = 0, last_price = 1000, last_slot = 100
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, 100);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.last_price, 10);
+        assert_eq!(oracle.last_price, 1000);
         assert_eq!(oracle.cumulative_price, 0);
         assert_eq!(oracle.last_slot, 100);
 
-        // Slot 110: set price=20
-        // slot_delta = 110 - 100 = 10, weighted = 10 * 10 = 100
-        // cumulative = 0 + 100 = 100, last_price = 20, last_slot = 110
-        do_update_price(&mut svm, &payer, &oracle_pda, 20, 110);
+        // Slot 110: set price=1100
+        // slot_delta = 110 - 100 = 10, weighted = 1000 * 10 = 10000
+        // cumulative = 0 + 10000 = 10000, last_price = 1100, last_slot = 110
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, 110);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.last_price, 20);
-        assert_eq!(oracle.cumulative_price, 100);
+        assert_eq!(oracle.last_price, 1100);
+        assert_eq!(oracle.cumulative_price, 10_000);
         assert_eq!(oracle.last_slot, 110);
 
-        // Slot 120: set price=15
-        // slot_delta = 120 - 110 = 10, weighted = 20 * 10 = 200
-        // cumulative = 100 + 200 = 300, last_price = 15, last_slot = 120
-        do_update_price(&mut svm, &payer, &oracle_pda, 15, 120);
+        // Slot 120: set price=1050
+        // slot_delta = 120 - 110 = 10, weighted = 1100 * 10 = 11000
+        // cumulative = 10000 + 11000 = 21000, last_price = 1050, last_slot = 120
+        do_update_price(&mut svm, &payer, &oracle_pda, 1050, 120);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.last_price, 15);
-        assert_eq!(oracle.cumulative_price, 300);
+        assert_eq!(oracle.last_price, 1050);
+        assert_eq!(oracle.cumulative_price, 21_000);
         assert_eq!(oracle.last_slot, 120);
     }
 
@@ -757,25 +750,25 @@ mod tests {
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
         svm.send_transaction(tx).unwrap();
 
-        // slot 100: price=10, cumulative=0
-        do_update_price(&mut svm, &payer, &oracle_pda, 10, 100);
-        // slot 110: price=20, cumulative=100
-        do_update_price(&mut svm, &payer, &oracle_pda, 20, 110);
-        // slot 120: price=15, cumulative=300
-        do_update_price(&mut svm, &payer, &oracle_pda, 15, 120);
+        // slot 100: price=1000, cumulative=0
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, 100);
+        // slot 110: price=1100, cumulative=10000
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, 110);
+        // slot 120: price=1050, cumulative=21000
+        do_update_price(&mut svm, &payer, &oracle_pda, 1050, 120);
 
         // Call get_swap at slot 120 with window_slots=20
         // current_slot = 120, slot_delta_since_last = 0
-        // cumulative_now = 300
+        // cumulative_now = 21000
         // window_start = 120 - 20 = 100
         // Past obs: need slot <= 100 → observation at slot 100 (cumulative=0)
-        // SWAP = (300 - 0) / (120 - 100) = 300 / 20 = 15
+        // SWAP = (21000 - 0) / (120 - 100) = 21000 / 20 = 1050
         let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 20);
-        assert_eq!(swap, 15);
+        assert_eq!(swap, 1050);
 
         // Verify: this makes sense because over slots 100-120:
-        // price=10 for 10 slots (100-110), price=20 for 10 slots (110-120)
-        // weighted avg = (10*10 + 20*10) / 20 = 300/20 = 15
+        // price=1000 for 10 slots (100-110), price=1100 for 10 slots (110-120)
+        // weighted avg = (1000*10 + 1100*10) / 20 = 21000/20 = 1050
     }
 
     // ── Edge case tests ──
@@ -860,10 +853,10 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
 
         // Try updating at the same slot (no warp) — should fail with StaleSlot
-        let ix = build_update_price_ix(&payer.pubkey(), &oracle_pda, 200);
+        let ix = build_update_price_ix(&payer.pubkey(), &oracle_pda, 1100);
         send_tx_expect_err(&mut svm, &payer, &[ix]);
     }
 
@@ -884,23 +877,23 @@ mod tests {
             init_oracle(&mut svm, &initializer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
         // updater_a (different from initializer) updates successfully
-        do_update_price(&mut svm, &updater_a, &oracle_pda, 500, init_slot + 10);
+        do_update_price(&mut svm, &updater_a, &oracle_pda, 1000, init_slot + 10);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.last_price, 500);
+        assert_eq!(oracle.last_price, 1000);
 
         // updater_b (yet another signer) also updates successfully
-        do_update_price(&mut svm, &updater_b, &oracle_pda, 750, init_slot + 20);
+        do_update_price(&mut svm, &updater_b, &oracle_pda, 1100, init_slot + 20);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.last_price, 750);
-        // cumulative = 0 + 500*10 = 5000
-        assert_eq!(oracle.cumulative_price, 5000);
+        assert_eq!(oracle.last_price, 1100);
+        // cumulative = 0 + 1000*10 = 10000
+        assert_eq!(oracle.cumulative_price, 10_000);
 
         // initializer can still update too
-        do_update_price(&mut svm, &initializer, &oracle_pda, 900, init_slot + 30);
+        do_update_price(&mut svm, &initializer, &oracle_pda, 1050, init_slot + 30);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.last_price, 900);
-        // cumulative = 5000 + 750*10 = 12500
-        assert_eq!(oracle.cumulative_price, 12500);
+        assert_eq!(oracle.last_price, 1050);
+        // cumulative = 10000 + 1100*10 = 21000
+        assert_eq!(oracle.cumulative_price, 21_000);
     }
 
     #[test]
@@ -914,20 +907,20 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        // Set price to 100, then back to 0
-        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
-        do_update_price(&mut svm, &payer, &oracle_pda, 0, init_slot + 20);
+        // Set price to 1000, then decrease within bounds, then increase
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 950, init_slot + 20);
 
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.last_price, 0);
-        // cumulative = 0 + 100*10 = 1000
-        assert_eq!(oracle.cumulative_price, 1000);
+        assert_eq!(oracle.last_price, 950);
+        // cumulative = 0 + 1000*10 = 10000
+        assert_eq!(oracle.cumulative_price, 10_000);
 
-        // Another update — zero price contributes nothing to cumulative
-        do_update_price(&mut svm, &payer, &oracle_pda, 50, init_slot + 30);
+        // Another update — price goes back up within bounds
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 30);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        // cumulative = 1000 + 0*10 = 1000
-        assert_eq!(oracle.cumulative_price, 1000);
+        // cumulative = 10000 + 950*10 = 19500
+        assert_eq!(oracle.cumulative_price, 19_500);
     }
 
     #[test]
@@ -967,15 +960,15 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        do_update_price(&mut svm, &payer, &oracle_pda, 500, init_slot + 1);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 1);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         assert_eq!(oracle.last_slot, init_slot + 1);
         assert_eq!(oracle.cumulative_price, 0); // 0 * 1
 
-        do_update_price(&mut svm, &payer, &oracle_pda, 600, init_slot + 2);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 2);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
-        // cumulative = 0 + 500 * 1 = 500
-        assert_eq!(oracle.cumulative_price, 500);
+        // cumulative = 0 + 1000 * 1 = 1000
+        assert_eq!(oracle.cumulative_price, 1000);
     }
 
     #[test]
@@ -989,7 +982,7 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, 1);
 
-        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
 
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
@@ -997,11 +990,11 @@ mod tests {
         assert_eq!(buffer.observations[0].slot, init_slot + 10);
 
         // Second update overwrites the only slot
-        do_update_price(&mut svm, &payer, &oracle_pda, 200, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 20);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
         assert_eq!(buffer.observations.len(), 1);
         assert_eq!(buffer.observations[0].slot, init_slot + 20);
-        assert_eq!(buffer.observations[0].cumulative_price, 1000); // 100 * 10
+        assert_eq!(buffer.observations[0].cumulative_price, 10_000); // 1000 * 10
     }
 
     #[test]
@@ -1017,12 +1010,12 @@ mod tests {
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, 3);
 
         // Fill buffer: slots +10, +20, +30
-        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
-        do_update_price(&mut svm, &payer, &oracle_pda, 200, init_slot + 20);
-        do_update_price(&mut svm, &payer, &oracle_pda, 300, init_slot + 30);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1050, init_slot + 30);
 
         // Overwrite oldest: slot +40 replaces slot +10
-        do_update_price(&mut svm, &payer, &oracle_pda, 400, init_slot + 40);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1090, init_slot + 40);
 
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
@@ -1108,18 +1101,18 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
-        do_update_price(&mut svm, &payer, &oracle_pda, 300, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 20);
 
         svm.warp_to_slot(init_slot + 30);
         svm.expire_blockhash();
 
-        // cumulative_now = 0 + 100*10 + 300*10 = 4000
+        // cumulative_now = 0 + 1000*10 + 1100*10 = 21000
         // window=20: window_start = 30-20 = init_slot+10
         // get_observation_before_slot(init_slot+11) → slot init_slot+10 (cumul=0)
-        // SWAP = 4000 / (30-10) = 200
+        // SWAP = 21000 / (30-10) = 1050
         let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 20);
-        assert_eq!(swap, 200);
+        assert_eq!(swap, 1050);
     }
 
     #[test]
@@ -1135,25 +1128,26 @@ mod tests {
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, 3);
 
         // Fill buffer: 3 observations
-        do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
-        do_update_price(&mut svm, &payer, &oracle_pda, 200, init_slot + 20);
-        do_update_price(&mut svm, &payer, &oracle_pda, 300, init_slot + 30);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1050, init_slot + 30);
 
         // Wrap: overwrites slot+10
-        do_update_price(&mut svm, &payer, &oracle_pda, 400, init_slot + 40);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1090, init_slot + 40);
 
         svm.warp_to_slot(init_slot + 50);
         svm.expire_blockhash();
 
-        // cumulative at slot+40: 0 + 100*10 + 200*10 + 300*10 = 6000
-        // cumulative_now = 6000 + 400*10 = 10_000
+        // cumulative at slot+10: 0
+        // cumulative at slot+20: 0 + 1000*10 = 10000
+        // cumulative at slot+30: 10000 + 1100*10 = 21000
+        // cumulative at slot+40: 21000 + 1050*10 = 31500
+        // cumulative_now = 31500 + 1090*10 = 42400
         // window=20: window_start = init_slot+30
-        // past_obs: need slot <= init_slot+30 → slot+30 (cumul=3000 at the time? let's check)
-        // obs at slot+20: cumul=1000, obs at slot+30: cumul=3000, obs at slot+40: cumul=6000
-        // past_obs = slot+30 (cumul=3000)
-        // SWAP = (10_000 - 3000) / (50 - 30) = 7000/20 = 350
+        // past_obs: need slot <= init_slot+30 → slot+30 (cumul=21000)
+        // SWAP = (42400 - 21000) / (50 - 30) = 21400/20 = 1070
         let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 20);
-        assert_eq!(swap, 350);
+        assert_eq!(swap, 1070);
     }
 
     #[test]
@@ -1174,28 +1168,26 @@ mod tests {
         let (oracle_pda, init_slot) =
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        // 20 updates, alternating price between 100 and 200
+        // 20 updates, alternating price between 1000 and 1100
         for i in 1..=20u64 {
-            let price = if i % 2 == 0 { 200 } else { 100 };
+            let price = if i % 2 == 0 { 1100 } else { 1000 };
             do_update_price(&mut svm, &payer, &oracle_pda, price, init_slot + i);
         }
 
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         assert_eq!(oracle.last_slot, init_slot + 20);
-        assert_eq!(oracle.last_price, 200);
+        assert_eq!(oracle.last_price, 1100);
 
-        // cumulative: first update (i=1) adds 0*1=0, second (i=2) adds 100*1=100,
-        // third (i=3) adds 200*1=200, etc.
-        // Sum = 0 + sum of (price_at_slot * 1) for slots 1..19
-        // Prices set: 100,200,100,200,...,100,200 (at slots 1..20)
+        // cumulative: first update (i=1) adds 0*1=0, second (i=2) adds 1000*1=1000,
+        // third (i=3) adds 1100*1=1100, etc.
         // Weighted contributions from previous price:
         // slot 1: prev=0, delta=1 → 0
-        // slot 2: prev=100, delta=1 → 100
-        // slot 3: prev=200, delta=1 → 200
-        // ...pattern: 0, 100, 200, 100, 200, ...
-        // Slots 2-20 (19 values): 100,200 alternating starting with 100
-        // 10 values of 100, 9 values of 200 = 1000 + 1800 = 2800
-        assert_eq!(oracle.cumulative_price, 2800);
+        // slot 2: prev=1000, delta=1 → 1000
+        // slot 3: prev=1100, delta=1 → 1100
+        // ...pattern: 0, then alternating 1000, 1100
+        // Slots 2-20 (19 values): 1000,1100 alternating starting with 1000
+        // 10 values of 1000, 9 values of 1100 = 10000 + 9900 = 19900
+        assert_eq!(oracle.cumulative_price, 19_900);
     }
 
     // ── Sealevel parallel execution tests ──
@@ -1399,8 +1391,8 @@ mod tests {
         let blockhash = svm.latest_blockhash();
         let tx = Transaction::new_signed_with_payer(
             &[
-                build_update_price_ix(&payer.pubkey(), &sol_oracle, 150),
-                build_update_price_ix(&payer.pubkey(), &eth_oracle, 2500),
+                build_update_price_ix(&payer.pubkey(), &sol_oracle, 110),
+                build_update_price_ix(&payer.pubkey(), &eth_oracle, 2200),
             ],
             Some(&payer.pubkey()),
             &[&payer],
@@ -1414,28 +1406,28 @@ mod tests {
 
         // SOL: cumul = 0*10 + 100*20 = 2000
         assert_eq!(sol.cumulative_price, 2000);
-        assert_eq!(sol.last_price, 150);
+        assert_eq!(sol.last_price, 110);
 
         // ETH: cumul = 0*10 + 2000*20 = 40_000
         assert_eq!(eth.cumulative_price, 40_000);
-        assert_eq!(eth.last_price, 2500);
+        assert_eq!(eth.last_price, 2200);
 
-        // Get SWAP for each pair over the full 20-slot window
+        // Get SWAP for each pair over the full 30-slot window
         svm.warp_to_slot(init_slot + 40);
         svm.expire_blockhash();
 
-        // SOL SWAP: cumul_now = 2000 + 150*10 = 3500
+        // SOL SWAP: cumul_now = 2000 + 110*10 = 3100
         // past obs at slot init_slot+10 (cumul=0)
-        // SWAP = 3500 / 30 = 116
+        // SWAP = 3100 / 30 = 103
         let sol_swap = do_get_swap(&mut svm, &payer, &sol_oracle, 30);
-        assert_eq!(sol_swap, 116);
+        assert_eq!(sol_swap, 103);
 
-        // ETH SWAP: cumul_now = 40_000 + 2500*10 = 65_000
+        // ETH SWAP: cumul_now = 40_000 + 2200*10 = 62_000
         // past obs at slot init_slot+10 (cumul=0)
-        // SWAP = 65_000 / 30 = 2166
+        // SWAP = 62_000 / 30 = 2066
         svm.expire_blockhash();
         let eth_swap = do_get_swap(&mut svm, &payer, &eth_oracle, 30);
-        assert_eq!(eth_swap, 2166);
+        assert_eq!(eth_swap, 2066);
     }
 
     #[test]
@@ -1524,7 +1516,7 @@ mod tests {
         let blockhash = svm.latest_blockhash();
 
         for (i, oracle) in oracle_pdas.iter().enumerate() {
-            let price = ((i + 1) * 200) as u128; // new prices: 200, 400, ..., 10000
+            let price = ((i + 1) * 110) as u128; // new prices: 110, 220, ..., 5500
             let tx = Transaction::new_signed_with_payer(
                 &[build_update_price_ix(&payer.pubkey(), oracle, price)],
                 Some(&payer.pubkey()),
@@ -1537,7 +1529,7 @@ mod tests {
         // Verify cumulative math is correct for all 50 pairs
         for (i, oracle_pda) in oracle_pdas.iter().enumerate() {
             let old_price = ((i + 1) * 100) as u128;
-            let new_price = ((i + 1) * 200) as u128;
+            let new_price = ((i + 1) * 110) as u128;
             let oracle = deserialize_oracle(&svm, oracle_pda);
 
             // cumulative = 0 + old_price * 20
@@ -1646,12 +1638,12 @@ mod tests {
             init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
         // A updates
-        do_update_price(&mut svm, &signer_a, &oracle_pda, 100, init_slot + 10);
+        do_update_price(&mut svm, &signer_a, &oracle_pda, 1000, init_slot + 10);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         assert_eq!(oracle.last_updater, signer_a.pubkey());
 
         // B updates — last_updater flips to B
-        do_update_price(&mut svm, &signer_b, &oracle_pda, 200, init_slot + 20);
+        do_update_price(&mut svm, &signer_b, &oracle_pda, 1100, init_slot + 20);
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         assert_eq!(oracle.last_updater, signer_b.pubkey());
     }
@@ -1796,5 +1788,76 @@ mod tests {
         svm.expire_blockhash();
         let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 20);
         assert_eq!(swap, 500);
+    }
+
+    // ── Price deviation guard tests ──
+
+    #[test]
+    fn test_update_price_within_deviation_threshold() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // First update (from 0) — always allowed regardless of deviation
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+
+        // 10% increase (exactly at 1000 bps boundary) — should succeed
+        do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 20);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 1100);
+
+        // 10% decrease from 1100 — should succeed
+        do_update_price(&mut svm, &payer, &oracle_pda, 990, init_slot + 30);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 990);
+    }
+
+    #[test]
+    fn test_update_price_exceeds_deviation_threshold() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+
+        // 11% increase — exceeds 10% threshold
+        svm.warp_to_slot(init_slot + 20);
+        svm.expire_blockhash();
+        let ix = build_update_price_ix(&payer.pubkey(), &oracle_pda, 1111);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        let result = svm.send_transaction(tx);
+        assert_anchor_error(&result, OracleError::PriceDeviationTooLarge);
+
+        // Oracle unchanged
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 1000);
+
+        // Large decrease — also rejected
+        let ix = build_update_price_ix(&payer.pubkey(), &oracle_pda, 800);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        let result = svm.send_transaction(tx);
+        assert_anchor_error(&result, OracleError::PriceDeviationTooLarge);
     }
 }

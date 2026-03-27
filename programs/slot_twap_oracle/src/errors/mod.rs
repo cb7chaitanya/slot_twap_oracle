@@ -16,4 +16,7 @@ pub enum OracleError {
 
     #[msg("Oracle data is stale — last update exceeds max staleness threshold")]
     StaleOracle,
+
+    #[msg("Price deviation from last update exceeds maximum allowed threshold")]
+    PriceDeviationTooLarge,
 }

@@ -25,6 +25,10 @@ pub struct UpdatePrice<'info> {
     pub observation_buffer: Account<'info, ObservationBuffer>,
 }
 
+/// Maximum allowed price deviation in basis points (10% = 1000 bps).
+const MAX_PRICE_DEVIATION_BPS: u128 = 1000;
+const BPS_DENOMINATOR: u128 = 10_000;
+
 pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
     let oracle = &mut ctx.accounts.oracle;
     let clock = Clock::get()?;
@@ -35,6 +39,24 @@ pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
         .ok_or(OracleError::PriceOverflow)?;
 
     require!(slot_delta > 0, OracleError::StaleSlot);
+
+    // Reject prices that deviate more than MAX_PRICE_DEVIATION_BPS from the
+    // last known price. Skip the check when last_price is zero (first update).
+    if oracle.last_price != 0 {
+        let diff = if new_price >= oracle.last_price {
+            new_price - oracle.last_price
+        } else {
+            oracle.last_price - new_price
+        };
+        let deviation_bps = diff
+            .checked_mul(BPS_DENOMINATOR)
+            .ok_or(OracleError::PriceOverflow)?
+            / oracle.last_price;
+        require!(
+            deviation_bps <= MAX_PRICE_DEVIATION_BPS,
+            OracleError::PriceDeviationTooLarge
+        );
+    }
 
     let weighted = (oracle.last_price)
         .checked_mul(slot_delta as u128)
