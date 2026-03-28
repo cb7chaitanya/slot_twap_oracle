@@ -1,80 +1,62 @@
 import { Connection, PublicKey } from "@solana/web3.js";
-import BN from "bn.js";
+import {
+  validatePoolAccount,
+  readPubkey,
+  matchMints,
+  fetchVaultBalances,
+  computePriceFromBalances,
+} from "./pool-utils";
 
 const METEORA_DLMM_PROGRAM_ID = new PublicKey(
   "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"
 );
 
-// Meteora DLMM LbPair account layout offsets (after 8-byte Anchor discriminator).
-// token_x_mint at 88, token_y_mint at 120, reserve_x at 152, reserve_y at 184.
-const LB_PAIR_MIN_SIZE = 216;
+// Meteora DLMM LbPair layout (after 8-byte Anchor discriminator):
+//   StaticParameters: 30 bytes    (8-38)
+//   VariableParameters: 32 bytes  (38-70)
+//   bump_seed: [u8;1]             (70)
+//   bin_step_seed: [u8;2]         (71-73)
+//   pair_type: u8                 (73)
+//   active_id: i32                (74-78)
+//   bin_step: u16                 (78-80)
+//   status: u8                    (80)
+//   _pad: ...                     (81-88)
+//   token_x_mint: Pubkey          (88-120)   ← verified on mainnet
+//   token_y_mint: Pubkey          (120-152)  ← verified on mainnet
+//   reserve_x: Pubkey             (152-184)  ← verified as TOKEN account
+//   reserve_y: Pubkey             (184-216)  ← verified as TOKEN account
+const MIN_SIZE = 216;
+const ACTIVE_ID_OFFSET = 74;
+const BIN_STEP_OFFSET = 78;
 const MINT_X_OFFSET = 88;
 const MINT_Y_OFFSET = 120;
 const RESERVE_X_OFFSET = 152;
 const RESERVE_Y_OFFSET = 184;
 
-function computePrice(numerator: BN, denominator: BN): number {
-  if (denominator.isZero()) {
-    throw new Error("Meteora: denominator reserve is zero");
-  }
-  const SCALE = new BN(10).pow(new BN(18));
-  const scaled = numerator.mul(SCALE).div(denominator);
-  return Number(scaled.toString()) / 1e18;
-}
-
-/**
- * Fetches the spot price from a Meteora DLMM pool.
- * Validates that pool mints match the oracle's base/quote mints.
- * If the pool token ordering is reversed, the price is inverted.
- */
 export async function fetchPrice(
   connection: Connection,
   poolAddress: PublicKey,
   baseMint: PublicKey,
   quoteMint: PublicKey
 ): Promise<number> {
-  const poolAccount = await connection.getAccountInfo(poolAddress);
-  if (!poolAccount)
-    throw new Error(`Meteora LB pair not found: ${poolAddress.toBase58()}`);
+  const info = await connection.getAccountInfo(poolAddress);
+  const data = validatePoolAccount(info, poolAddress, METEORA_DLMM_PROGRAM_ID, MIN_SIZE, "Meteora");
 
-  if (!poolAccount.owner.equals(METEORA_DLMM_PROGRAM_ID)) {
-    throw new Error(
-      `Meteora LB pair ${poolAddress.toBase58()} not owned by DLMM program`
-    );
+  const mintX = readPubkey(data, MINT_X_OFFSET);
+  const mintY = readPubkey(data, MINT_Y_OFFSET);
+  const direction = matchMints(mintX, mintY, baseMint, quoteMint, "Meteora");
+
+  const reserveX = readPubkey(data, RESERVE_X_OFFSET);
+  const reserveY = readPubkey(data, RESERVE_Y_OFFSET);
+
+  const { amountA, amountB } = await fetchVaultBalances(
+    connection, reserveX, reserveY, "Meteora"
+  );
+
+  const rawPrice = computePriceFromBalances(amountB, amountA, "Meteora");
+  if (!isFinite(rawPrice) || rawPrice === 0) {
+    throw new Error(`Meteora: invalid price: ${rawPrice}`);
   }
 
-  if (poolAccount.data.length < LB_PAIR_MIN_SIZE) {
-    throw new Error(
-      `Meteora LB pair data too small: expected >= ${LB_PAIR_MIN_SIZE}, got ${poolAccount.data.length}`
-    );
-  }
-
-  const data = poolAccount.data;
-  const mintX = new PublicKey(data.subarray(MINT_X_OFFSET, MINT_X_OFFSET + 32));
-  const mintY = new PublicKey(data.subarray(MINT_Y_OFFSET, MINT_Y_OFFSET + 32));
-
-  const forward = mintX.equals(baseMint) && mintY.equals(quoteMint);
-  const reversed = mintX.equals(quoteMint) && mintY.equals(baseMint);
-
-  if (!forward && !reversed) {
-    throw new Error(
-      `Meteora: pool mints (${mintX.toBase58()}, ${mintY.toBase58()}) ` +
-        `do not match oracle mints (${baseMint.toBase58()}, ${quoteMint.toBase58()})`
-    );
-  }
-
-  const reserveX = new PublicKey(data.subarray(RESERVE_X_OFFSET, RESERVE_X_OFFSET + 32));
-  const reserveY = new PublicKey(data.subarray(RESERVE_Y_OFFSET, RESERVE_Y_OFFSET + 32));
-
-  const [balanceX, balanceY] = await Promise.all([
-    connection.getTokenAccountBalance(reserveX),
-    connection.getTokenAccountBalance(reserveY),
-  ]);
-
-  const amountX = new BN(balanceX.value.amount);
-  const amountY = new BN(balanceY.value.amount);
-
-  // price = Y / X in pool terms
-  const rawPrice = computePrice(amountY, amountX);
-  return reversed ? 1 / rawPrice : rawPrice;
+  return direction === "reversed" ? 1 / rawPrice : rawPrice;
 }
