@@ -41,6 +41,13 @@ export function startPrometheusServer(
       lines.push(`oracle_last_update_slot{pair="${label}"} ${slot}`);
     }
 
+    lines.push("# HELP oracle_price_confidence Price confidence score per oracle pair (0-1)");
+    lines.push("# TYPE oracle_price_confidence gauge");
+    for (const [pair, conf] of Object.entries(snap.lastConfidence)) {
+      const label = pair.replace(/"/g, '\\"');
+      lines.push(`oracle_price_confidence{pair="${label}"} ${conf.toFixed(4)}`);
+    }
+
     res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" });
     res.end(lines.join("\n") + "\n");
   });

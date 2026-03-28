@@ -245,11 +245,28 @@ async function updatePair(pair: Pair): Promise<void> {
   }
 
   const medianPrice = median(prices);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const spread = medianPrice > 0 ? (maxPrice - minPrice) / medianPrice : 0;
+
+  if (spread > MAX_SOURCE_SPREAD) {
+    warn(
+      pair.name,
+      `Post-filter spread too high: ${(spread * 100).toFixed(2)}% ` +
+        `(min=${minPrice}, max=${maxPrice}, median=${medianPrice}). Skipping.`
+    );
+    metrics.recordSkip();
+    return;
+  }
+
+  const confidence = (prices.length / pair.sources.length) * (1 - spread);
   const scaledPrice = toScaledBigint(medianPrice);
 
   log(
     pair.name,
-    `Median: ${medianPrice} (${prices.length}/${namedPrices.length} sources after filter) -> scaled: ${scaledPrice}`
+    `Median: ${medianPrice} (${prices.length}/${pair.sources.length} sources, ` +
+      `spread=${(spread * 100).toFixed(2)}%, confidence=${(confidence * 100).toFixed(1)}%) ` +
+      `-> scaled: ${scaledPrice}`
   );
 
   const sig = await retryWithBackoff(
@@ -258,7 +275,7 @@ async function updatePair(pair: Pair): Promise<void> {
   );
 
   const currentSlot = await connection.getSlot();
-  metrics.recordSuccess(pair.name, currentSlot);
+  metrics.recordSuccess(pair.name, currentSlot, confidence);
 
   log(pair.name, `update_price tx: ${sig} (slot=${currentSlot}, price=${medianPrice})`);
 }

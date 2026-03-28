@@ -10,6 +10,7 @@ export interface MetricsData {
   staleOracles: number;
   lastSuccessfulUpdate: string | null; // ISO timestamp
   lastUpdateSlot: Record<string, number>;
+  lastConfidence: Record<string, number>;
 }
 
 function empty(): MetricsData {
@@ -20,6 +21,7 @@ function empty(): MetricsData {
     staleOracles: 0,
     lastSuccessfulUpdate: null,
     lastUpdateSlot: {},
+    lastConfidence: {},
   };
 }
 
@@ -63,10 +65,13 @@ export class PersistentMetrics {
     return this.data.lastUpdateSlot[pair];
   }
 
-  recordSuccess(pair: string, slot: number): void {
+  recordSuccess(pair: string, slot: number, confidence?: number): void {
     this.data.successful++;
     this.data.lastSuccessfulUpdate = new Date().toISOString();
     this.data.lastUpdateSlot[pair] = slot;
+    if (confidence !== undefined) {
+      this.data.lastConfidence[pair] = confidence;
+    }
     this.save();
   }
 
