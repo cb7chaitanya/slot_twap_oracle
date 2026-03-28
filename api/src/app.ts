@@ -2,7 +2,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import { config } from "./config";
 import { isDbAvailable } from "./db";
-import { requestLogger, errorHandler } from "./middleware";
+import { requestLogger, requireApiKey, errorHandler } from "./middleware";
 import priceRouter from "./routes/price";
 import twapRouter from "./routes/twap";
 import historyRouter from "./routes/history";
@@ -11,6 +11,7 @@ import historicalRouter from "./routes/historical";
 
 const app = express();
 
+app.use(express.json());
 app.use(requestLogger);
 
 const apiLimiter = rateLimit({
@@ -21,11 +22,15 @@ const apiLimiter = rateLimit({
   message: { error: "Too many requests, please try again later." },
 });
 
+// Public read-only endpoints
 app.use("/price", apiLimiter, priceRouter);
 app.use("/twap", apiLimiter, twapRouter);
 app.use("/history", apiLimiter, historyRouter);
 app.use("/historical", apiLimiter, historicalRouter);
 app.use("/health", healthRouter);
+
+// Protected admin endpoints (require API_KEY when set)
+app.use("/admin", requireApiKey);
 
 app.use(errorHandler);
 

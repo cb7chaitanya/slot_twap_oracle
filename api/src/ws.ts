@@ -29,10 +29,17 @@ function ts(): string {
   return new Date().toISOString();
 }
 
-function send(ws: WebSocket, data: object): void {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(data));
+const MAX_BUFFERED = config.WS_MAX_BUFFERED_BYTES;
+
+function send(ws: WebSocket, data: object): boolean {
+  if (ws.readyState !== WebSocket.OPEN) return false;
+  if (ws.bufferedAmount > MAX_BUFFERED) {
+    console.warn(`${ts()} [ws] Closing slow client (buffered=${ws.bufferedAmount})`);
+    ws.close(1008, "Backpressure — too slow");
+    return false;
   }
+  ws.send(JSON.stringify(data));
+  return true;
 }
 
 function isRateLimited(state: ClientState): boolean {

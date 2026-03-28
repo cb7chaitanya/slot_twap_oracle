@@ -10,6 +10,8 @@ const envSchema = z.object({
   WS_MAX_SUBS_PER_CLIENT: z.coerce.number().int().positive().default(10),
   WS_MSG_PER_MIN: z.coerce.number().int().positive().default(30),
   POSTGRES_URL: z.string().optional(),
+  API_KEY: z.string().optional(),
+  WS_MAX_BUFFERED_BYTES: z.coerce.number().int().positive().default(65_536),
 });
 
 const parsed = envSchema.safeParse(process.env);

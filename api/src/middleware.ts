@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { config } from "./config";
 
 export function requestLogger(req: Request, _res: Response, next: NextFunction): void {
   const start = Date.now();
@@ -8,6 +9,19 @@ export function requestLogger(req: Request, _res: Response, next: NextFunction):
       `${new Date().toISOString()} ${req.method} ${req.originalUrl} ${_res.statusCode} ${ms}ms`
     );
   });
+  next();
+}
+
+export function requireApiKey(req: Request, res: Response, next: NextFunction): void {
+  if (!config.API_KEY) {
+    next();
+    return;
+  }
+  const key = req.headers["x-api-key"] || req.query.api_key;
+  if (key !== config.API_KEY) {
+    res.status(401).json({ error: "Unauthorized — invalid or missing API key" });
+    return;
+  }
   next();
 }
 
