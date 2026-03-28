@@ -205,30 +205,6 @@ export class SlotTwapOracleClient {
       .rpc();
   }
 
-  async claimReward(
-    oracle: PublicKey,
-    rewardMint: PublicKey,
-    updaterTokenAccount: PublicKey,
-    updater: Signer,
-    tokenProgramId: PublicKey = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
-  ): Promise<string> {
-    const [rewardVault] = this.findRewardVaultPda(oracle);
-    const [vaultTokenAccount] = this.findVaultTokenAccountPda(oracle);
-
-    return this.program.methods
-      .claimReward()
-      .accounts({
-        oracle,
-        rewardVault,
-        vaultTokenAccount,
-        rewardMint,
-        updaterTokenAccount,
-        updater: updater.publicKey,
-        tokenProgram: tokenProgramId,
-      })
-      .signers([updater])
-      .rpc();
-  }
 
   async getSwap(oracle: PublicKey, windowSlots: BN, maxStalenessSlots: BN): Promise<BN> {
     const [observationBuffer] = this.findObservationBufferPda(oracle);

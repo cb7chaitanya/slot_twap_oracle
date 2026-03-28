@@ -10,4 +10,6 @@ pub struct RewardVault {
     pub reward_per_update: u64,
     pub total_distributed: u64,
     pub total_updates_rewarded: u64,
+    /// Slot of the last rewarded update — prevents double-pay.
+    pub last_rewarded_slot: u64,
 }

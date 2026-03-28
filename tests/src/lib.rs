@@ -2616,29 +2616,54 @@ mod tests {
         }
     }
 
-    fn build_claim_reward_ix(
+    /// Build update_price with reward accounts (pays previous updater automatically).
+    fn build_update_price_with_reward_ix(
+        payer: &Pubkey,
         oracle: &Pubkey,
         reward_mint: &Pubkey,
-        updater: &Pubkey,
-        updater_token_account: &Pubkey,
+        prev_updater_ata: &Pubkey,
+        new_price: u128,
     ) -> Instruction {
+        let (obs_pda, _) = observation_buffer_pda(oracle);
         let (vault_pda, _) = reward_vault_pda(oracle);
         let (vault_token, _) = vault_token_account_pda(oracle);
-        let data = slot_twap_oracle::instruction::ClaimReward.data();
+        let data = slot_twap_oracle::instruction::UpdatePrice { new_price }.data();
 
         Instruction {
             program_id: program_id(),
             accounts: vec![
-                AccountMeta::new_readonly(*oracle, false),
-                AccountMeta::new(vault_pda, false),
-                AccountMeta::new(vault_token, false),
-                AccountMeta::new_readonly(*reward_mint, false),
-                AccountMeta::new(*updater_token_account, false),
-                AccountMeta::new_readonly(*updater, true),
-                AccountMeta::new_readonly(spl_token_2022::id(), false),
+                AccountMeta::new_readonly(*payer, true),
+                AccountMeta::new(*oracle, false),
+                AccountMeta::new(obs_pda, false),
+                AccountMeta::new(vault_pda, false),         // reward_vault
+                AccountMeta::new(vault_token, false),       // vault_token_account
+                AccountMeta::new_readonly(*reward_mint, false), // reward_mint
+                AccountMeta::new(*prev_updater_ata, false), // previous_updater_token_account
+                AccountMeta::new_readonly(spl_token_2022::id(), false), // token_program
             ],
             data,
         }
+    }
+
+    fn do_update_price_with_reward(
+        svm: &mut LiteSVM,
+        payer: &Keypair,
+        oracle_pda: &Pubkey,
+        reward_mint: &Pubkey,
+        prev_updater_ata: &Pubkey,
+        new_price: u128,
+        target_slot: u64,
+    ) {
+        svm.warp_to_slot(target_slot);
+        svm.expire_blockhash();
+        let ix = build_update_price_with_reward_ix(
+            &payer.pubkey(), oracle_pda, reward_mint, prev_updater_ata, new_price,
+        );
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix], Some(&payer.pubkey()), &[payer], blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
     }
 
     // ── Reward vault tests ──
@@ -2796,91 +2821,7 @@ mod tests {
     }
 
     #[test]
-    fn test_claim_reward_success() {
-        let mut svm = setup();
-        let owner = Keypair::new();
-        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
-
-        let reward_per_update = 1_000_000u64;
-        let (oracle_pda, reward_mint, _, init_slot) =
-            setup_reward_test(&mut svm, &owner, reward_per_update, 10_000_000);
-
-        // Update price so owner becomes last_updater
-        do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
-
-        // Create updater token account
-        let updater_ata = create_token_account(&mut svm, &owner, &reward_mint, &owner.pubkey());
-
-        // Claim reward
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &owner.pubkey(), &updater_ata);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&owner.pubkey()), &[&owner], blockhash);
-        svm.send_transaction(tx).unwrap();
-
-        // Verify token transferred
-        assert_eq!(get_token_balance(&svm, &updater_ata), reward_per_update);
-
-        // Verify vault accounting
-        let (vault_pda, _) = reward_vault_pda(&oracle_pda);
-        let vault = deserialize_reward_vault(&svm, &vault_pda);
-        assert_eq!(vault.total_distributed, reward_per_update);
-        assert_eq!(vault.total_updates_rewarded, 1);
-
-        // Verify vault balance decreased
-        let (vault_token, _) = vault_token_account_pda(&oracle_pda);
-        assert_eq!(get_token_balance(&svm, &vault_token), 10_000_000 - reward_per_update);
-    }
-
-    #[test]
-    fn test_claim_reward_non_last_updater_fails() {
-        let mut svm = setup();
-        let owner = Keypair::new();
-        let updater = Keypair::new();
-        let attacker = Keypair::new();
-        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
-        svm.airdrop(&updater.pubkey(), 10_000_000_000).unwrap();
-        svm.airdrop(&attacker.pubkey(), 10_000_000_000).unwrap();
-
-        let (oracle_pda, reward_mint, _, init_slot) =
-            setup_reward_test(&mut svm, &owner, 1_000_000, 10_000_000);
-
-        // updater updates price → becomes last_updater
-        do_update_price(&mut svm, &updater, &oracle_pda, 1000, init_slot + 10);
-
-        // attacker tries to claim — should fail
-        let attacker_ata = create_token_account(&mut svm, &attacker, &reward_mint, &attacker.pubkey());
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &attacker.pubkey(), &attacker_ata);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&attacker.pubkey()), &[&attacker], blockhash);
-        let result = svm.send_transaction(tx);
-        assert_anchor_error(&result, OracleError::Unauthorized);
-
-        // attacker got nothing
-        assert_eq!(get_token_balance(&svm, &attacker_ata), 0);
-    }
-
-    #[test]
-    fn test_claim_reward_empty_vault_fails() {
-        let mut svm = setup();
-        let owner = Keypair::new();
-        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
-
-        // Fund with 0 tokens
-        let (oracle_pda, reward_mint, _, init_slot) =
-            setup_reward_test(&mut svm, &owner, 1_000_000, 0);
-
-        do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
-
-        let updater_ata = create_token_account(&mut svm, &owner, &reward_mint, &owner.pubkey());
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &owner.pubkey(), &updater_ata);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&owner.pubkey()), &[&owner], blockhash);
-        let result = svm.send_transaction(tx);
-        assert_anchor_error(&result, OracleError::InsufficientRewardBalance);
-    }
-
-    #[test]
-    fn test_claim_reward_multiple_updaters() {
+    fn test_auto_reward_on_second_update() {
         let mut svm = setup();
         let owner = Keypair::new();
         let updater_a = Keypair::new();
@@ -2889,37 +2830,72 @@ mod tests {
         svm.airdrop(&updater_a.pubkey(), 10_000_000_000).unwrap();
         svm.airdrop(&updater_b.pubkey(), 10_000_000_000).unwrap();
 
-        let reward_per_update = 500_000u64;
+        let reward_per_update = 1_000_000u64;
         let (oracle_pda, reward_mint, _, init_slot) =
             setup_reward_test(&mut svm, &owner, reward_per_update, 10_000_000);
 
-        let ata_a = create_token_account(&mut svm, &updater_a, &reward_mint, &updater_a.pubkey());
-        let ata_b = create_token_account(&mut svm, &updater_b, &reward_mint, &updater_b.pubkey());
-
-        // A updates and claims
+        // First update (no reward — no previous updater)
         do_update_price(&mut svm, &updater_a, &oracle_pda, 1000, init_slot + 10);
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &updater_a.pubkey(), &ata_a);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&updater_a.pubkey()), &[&updater_a], blockhash);
-        svm.send_transaction(tx).unwrap();
+
+        // Create A's token account to receive reward
+        let ata_a = create_token_account(&mut svm, &updater_a, &reward_mint, &updater_a.pubkey());
+
+        // Second update by B — pays A automatically
+        do_update_price_with_reward(
+            &mut svm, &updater_b, &oracle_pda, &reward_mint, &ata_a,
+            1050, init_slot + 20,
+        );
+
+        // A received reward
         assert_eq!(get_token_balance(&svm, &ata_a), reward_per_update);
 
-        // B updates and claims
-        do_update_price(&mut svm, &updater_b, &oracle_pda, 1050, init_slot + 20);
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &updater_b.pubkey(), &ata_b);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&updater_b.pubkey()), &[&updater_b], blockhash);
-        svm.send_transaction(tx).unwrap();
-        assert_eq!(get_token_balance(&svm, &ata_b), reward_per_update);
+        // Vault accounting updated
+        let (vault_pda, _) = reward_vault_pda(&oracle_pda);
+        let vault = deserialize_reward_vault(&svm, &vault_pda);
+        assert_eq!(vault.total_distributed, reward_per_update);
+        assert_eq!(vault.total_updates_rewarded, 1);
+        assert_eq!(vault.last_rewarded_slot, init_slot + 10);
+    }
 
-        // A can no longer claim (B is last_updater)
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &updater_a.pubkey(), &ata_a);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&updater_a.pubkey()), &[&updater_a], blockhash);
-        let result = svm.send_transaction(tx);
-        assert_anchor_error(&result, OracleError::Unauthorized);
+    #[test]
+    fn test_auto_reward_no_double_pay() {
+        // Two updates at different slots. The second pays the first.
+        // A third update without advancing slot should not re-pay.
+        // (But slot must advance for update_price to succeed, so we test
+        // that repeated updates each pay exactly once.)
+        let mut svm = setup();
+        let owner = Keypair::new();
+        let u1 = Keypair::new();
+        let u2 = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&u1.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&u2.pubkey(), 10_000_000_000).unwrap();
 
-        // Verify vault accounting
+        let reward_per_update = 500_000u64;
+        let (oracle_pda, reward_mint, _, init_slot) =
+            setup_reward_test(&mut svm, &owner, reward_per_update, 5_000_000);
+
+        let ata1 = create_token_account(&mut svm, &u1, &reward_mint, &u1.pubkey());
+        let ata2 = create_token_account(&mut svm, &u2, &reward_mint, &u2.pubkey());
+
+        // u1 updates (no reward yet)
+        do_update_price(&mut svm, &u1, &oracle_pda, 1000, init_slot + 10);
+
+        // u2 updates → pays u1
+        do_update_price_with_reward(
+            &mut svm, &u2, &oracle_pda, &reward_mint, &ata1,
+            1050, init_slot + 20,
+        );
+        assert_eq!(get_token_balance(&svm, &ata1), reward_per_update);
+
+        // u1 updates again → pays u2
+        do_update_price_with_reward(
+            &mut svm, &u1, &oracle_pda, &reward_mint, &ata2,
+            1000, init_slot + 30,
+        );
+        assert_eq!(get_token_balance(&svm, &ata2), reward_per_update);
+
+        // Each was paid exactly once
         let (vault_pda, _) = reward_vault_pda(&oracle_pda);
         let vault = deserialize_reward_vault(&svm, &vault_pda);
         assert_eq!(vault.total_distributed, reward_per_update * 2);
@@ -2927,36 +2903,61 @@ mod tests {
     }
 
     #[test]
-    fn test_claim_reward_vault_drains_exactly() {
+    fn test_auto_reward_skips_when_vault_empty() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        let u1 = Keypair::new();
+        let u2 = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&u1.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&u2.pubkey(), 10_000_000_000).unwrap();
+
+        // Fund with 0 tokens
+        let (oracle_pda, reward_mint, _, init_slot) =
+            setup_reward_test(&mut svm, &owner, 1_000_000, 0);
+
+        let ata1 = create_token_account(&mut svm, &u1, &reward_mint, &u1.pubkey());
+
+        // u1 updates
+        do_update_price(&mut svm, &u1, &oracle_pda, 1000, init_slot + 10);
+
+        // u2 updates with reward accounts — vault empty, should NOT fail
+        // (auto-reward silently skips when vault has insufficient balance)
+        do_update_price_with_reward(
+            &mut svm, &u2, &oracle_pda, &reward_mint, &ata1,
+            1050, init_slot + 20,
+        );
+
+        // u1 got nothing (vault was empty)
+        assert_eq!(get_token_balance(&svm, &ata1), 0);
+
+        // But the price update still succeeded
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 1050);
+        assert_eq!(oracle.last_updater, u2.pubkey());
+    }
+
+    #[test]
+    fn test_auto_reward_works_without_reward_accounts() {
+        // update_price without reward accounts (backward compatible)
         let mut svm = setup();
         let owner = Keypair::new();
         svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
 
-        // Fund with exactly 1 reward worth
-        let reward_per_update = 1_000_000u64;
-        let (oracle_pda, reward_mint, _, init_slot) =
-            setup_reward_test(&mut svm, &owner, reward_per_update, reward_per_update);
+        let (oracle_pda, _reward_mint, _, init_slot) =
+            setup_reward_test(&mut svm, &owner, 1_000_000, 10_000_000);
 
+        // Regular update without reward accounts — should work fine
         do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
-
-        let updater_ata = create_token_account(&mut svm, &owner, &reward_mint, &owner.pubkey());
-
-        // First claim succeeds — drains vault to 0
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &owner.pubkey(), &updater_ata);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&owner.pubkey()), &[&owner], blockhash);
-        svm.send_transaction(tx).unwrap();
-
-        let (vault_token, _) = vault_token_account_pda(&oracle_pda);
-        assert_eq!(get_token_balance(&svm, &vault_token), 0);
-
-        // Second update + claim fails — vault empty
         do_update_price(&mut svm, &owner, &oracle_pda, 1050, init_slot + 20);
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &owner.pubkey(), &updater_ata);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&owner.pubkey()), &[&owner], blockhash);
-        let result = svm.send_transaction(tx);
-        assert_anchor_error(&result, OracleError::InsufficientRewardBalance);
+
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 1050);
+
+        // Vault untouched
+        let (vault_pda, _) = reward_vault_pda(&oracle_pda);
+        let vault = deserialize_reward_vault(&svm, &vault_pda);
+        assert_eq!(vault.total_distributed, 0);
     }
 
     #[test]
@@ -2970,7 +2971,6 @@ mod tests {
         let (oracle_pda, reward_mint, _, _) =
             setup_reward_test(&mut svm, &owner, 1_000_000, 0);
 
-        // Non-owner funds the vault — should succeed
         let funder_ata = create_token_account(&mut svm, &funder, &reward_mint, &funder.pubkey());
         mint_tokens(&mut svm, &owner, &reward_mint, &funder_ata, 5_000_000);
 
@@ -2981,212 +2981,6 @@ mod tests {
 
         let (vault_token, _) = vault_token_account_pda(&oracle_pda);
         assert_eq!(get_token_balance(&svm, &vault_token), 5_000_000);
-    }
-
-    #[test]
-    fn test_reward_distribution_five_round_rotation() {
-        // Three updaters rotate over 5 rounds. Each round: update + claim.
-        // Verify per-updater balances and vault accounting after all rounds.
-        let mut svm = setup();
-        let owner = Keypair::new();
-        let u1 = Keypair::new();
-        let u2 = Keypair::new();
-        let u3 = Keypair::new();
-        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
-        svm.airdrop(&u1.pubkey(), 10_000_000_000).unwrap();
-        svm.airdrop(&u2.pubkey(), 10_000_000_000).unwrap();
-        svm.airdrop(&u3.pubkey(), 10_000_000_000).unwrap();
-
-        let reward_per_update = 100_000u64;
-        let total_fund = reward_per_update * 5;
-        let (oracle_pda, reward_mint, _, init_slot) =
-            setup_reward_test(&mut svm, &owner, reward_per_update, total_fund);
-
-        let ata1 = create_token_account(&mut svm, &u1, &reward_mint, &u1.pubkey());
-        let ata2 = create_token_account(&mut svm, &u2, &reward_mint, &u2.pubkey());
-        let ata3 = create_token_account(&mut svm, &u3, &reward_mint, &u3.pubkey());
-
-        // Round order: u1, u2, u3, u1, u2
-        let rounds: Vec<(&Keypair, &Pubkey, u128)> = vec![
-            (&u1, &ata1, 1000),
-            (&u2, &ata2, 1050),
-            (&u3, &ata3, 1100),
-            (&u1, &ata1, 1050),
-            (&u2, &ata2, 1000),
-        ];
-
-        for (i, (updater, ata, price)) in rounds.iter().enumerate() {
-            let slot = init_slot + ((i as u64 + 1) * 10);
-            do_update_price(&mut svm, updater, &oracle_pda, *price, slot);
-
-            let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &updater.pubkey(), ata);
-            let blockhash = svm.latest_blockhash();
-            let tx = Transaction::new_signed_with_payer(
-                &[ix],
-                Some(&updater.pubkey()),
-                &[updater],
-                blockhash,
-            );
-            svm.send_transaction(tx).unwrap();
-        }
-
-        // u1 claimed in rounds 0,3 → 2 rewards
-        assert_eq!(get_token_balance(&svm, &ata1), reward_per_update * 2);
-        // u2 claimed in rounds 1,4 → 2 rewards
-        assert_eq!(get_token_balance(&svm, &ata2), reward_per_update * 2);
-        // u3 claimed in round 2 → 1 reward
-        assert_eq!(get_token_balance(&svm, &ata3), reward_per_update * 1);
-
-        // Vault should be fully drained
-        let (vault_token, _) = vault_token_account_pda(&oracle_pda);
-        assert_eq!(get_token_balance(&svm, &vault_token), 0);
-
-        // Accounting matches
-        let (vault_pda, _) = reward_vault_pda(&oracle_pda);
-        let vault = deserialize_reward_vault(&svm, &vault_pda);
-        assert_eq!(vault.total_distributed, total_fund);
-        assert_eq!(vault.total_updates_rewarded, 5);
-    }
-
-    #[test]
-    fn test_update_without_claim_then_new_updater_claims() {
-        // u1 updates but doesn't claim. u2 updates and claims.
-        // u1 can no longer claim their earlier update.
-        let mut svm = setup();
-        let owner = Keypair::new();
-        let u1 = Keypair::new();
-        let u2 = Keypair::new();
-        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
-        svm.airdrop(&u1.pubkey(), 10_000_000_000).unwrap();
-        svm.airdrop(&u2.pubkey(), 10_000_000_000).unwrap();
-
-        let reward_per_update = 1_000_000u64;
-        let (oracle_pda, reward_mint, _, init_slot) =
-            setup_reward_test(&mut svm, &owner, reward_per_update, 5_000_000);
-
-        let ata1 = create_token_account(&mut svm, &u1, &reward_mint, &u1.pubkey());
-        let ata2 = create_token_account(&mut svm, &u2, &reward_mint, &u2.pubkey());
-
-        // u1 updates but does NOT claim
-        do_update_price(&mut svm, &u1, &oracle_pda, 1000, init_slot + 10);
-
-        // u2 updates — now u2 is last_updater, u1 lost their window
-        do_update_price(&mut svm, &u2, &oracle_pda, 1050, init_slot + 20);
-
-        // u1 tries to claim — fails
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &u1.pubkey(), &ata1);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&u1.pubkey()), &[&u1], blockhash);
-        let result = svm.send_transaction(tx);
-        assert_anchor_error(&result, OracleError::Unauthorized);
-        assert_eq!(get_token_balance(&svm, &ata1), 0);
-
-        // u2 claims successfully
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &u2.pubkey(), &ata2);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&u2.pubkey()), &[&u2], blockhash);
-        svm.send_transaction(tx).unwrap();
-        assert_eq!(get_token_balance(&svm, &ata2), reward_per_update);
-
-        // Only 1 reward distributed (u1's update was unrewarded)
-        let (vault_pda, _) = reward_vault_pda(&oracle_pda);
-        let vault = deserialize_reward_vault(&svm, &vault_pda);
-        assert_eq!(vault.total_distributed, reward_per_update);
-        assert_eq!(vault.total_updates_rewarded, 1);
-    }
-
-    #[test]
-    fn test_double_claim_same_updater_fails() {
-        // Same updater claims twice without a new update_price in between.
-        // Second claim should fail because vault accounting doesn't prevent it,
-        // but the vault balance will be insufficient if funded for exactly N.
-        // With sufficient funding, the protocol allows it — this tests that the
-        // token transfer actually works twice (no stale state).
-        let mut svm = setup();
-        let owner = Keypair::new();
-        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
-
-        let reward_per_update = 500_000u64;
-        let (oracle_pda, reward_mint, _, init_slot) =
-            setup_reward_test(&mut svm, &owner, reward_per_update, 2_000_000);
-
-        do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
-        let updater_ata = create_token_account(&mut svm, &owner, &reward_mint, &owner.pubkey());
-
-        // First claim
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &owner.pubkey(), &updater_ata);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&owner.pubkey()), &[&owner], blockhash);
-        svm.send_transaction(tx).unwrap();
-        assert_eq!(get_token_balance(&svm, &updater_ata), reward_per_update);
-
-        // Second claim — still last_updater, vault has funds
-        svm.expire_blockhash();
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &owner.pubkey(), &updater_ata);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&owner.pubkey()), &[&owner], blockhash);
-        svm.send_transaction(tx).unwrap();
-        assert_eq!(get_token_balance(&svm, &updater_ata), reward_per_update * 2);
-
-        let (vault_pda, _) = reward_vault_pda(&oracle_pda);
-        let vault = deserialize_reward_vault(&svm, &vault_pda);
-        assert_eq!(vault.total_distributed, reward_per_update * 2);
-        assert_eq!(vault.total_updates_rewarded, 2);
-    }
-
-    #[test]
-    fn test_refund_vault_mid_distribution() {
-        // Vault runs low, gets refunded, distribution continues.
-        let mut svm = setup();
-        let owner = Keypair::new();
-        let updater = Keypair::new();
-        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
-        svm.airdrop(&updater.pubkey(), 10_000_000_000).unwrap();
-
-        let reward_per_update = 1_000_000u64;
-        // Fund with exactly 1 reward
-        let (oracle_pda, reward_mint, _, init_slot) =
-            setup_reward_test(&mut svm, &owner, reward_per_update, reward_per_update);
-
-        let updater_ata = create_token_account(&mut svm, &updater, &reward_mint, &updater.pubkey());
-
-        // Round 1: update + claim — drains vault
-        do_update_price(&mut svm, &updater, &oracle_pda, 1000, init_slot + 10);
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &updater.pubkey(), &updater_ata);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&updater.pubkey()), &[&updater], blockhash);
-        svm.send_transaction(tx).unwrap();
-
-        // Round 2: update succeeds but claim fails — empty
-        do_update_price(&mut svm, &updater, &oracle_pda, 1050, init_slot + 20);
-        svm.expire_blockhash();
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &updater.pubkey(), &updater_ata);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&updater.pubkey()), &[&updater], blockhash);
-        let result = svm.send_transaction(tx);
-        assert_anchor_error(&result, OracleError::InsufficientRewardBalance);
-
-        // Owner refunds the vault
-        let owner_ata = create_token_account(&mut svm, &owner, &reward_mint, &owner.pubkey());
-        mint_tokens(&mut svm, &owner, &reward_mint, &owner_ata, 3_000_000);
-        let ix = build_fund_reward_vault_ix(&oracle_pda, &reward_mint, &owner.pubkey(), &owner_ata, 3_000_000);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&owner.pubkey()), &[&owner], blockhash);
-        svm.send_transaction(tx).unwrap();
-
-        // Round 3: claim now succeeds
-        svm.expire_blockhash();
-        let ix = build_claim_reward_ix(&oracle_pda, &reward_mint, &updater.pubkey(), &updater_ata);
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(&[ix], Some(&updater.pubkey()), &[&updater], blockhash);
-        svm.send_transaction(tx).unwrap();
-
-        assert_eq!(get_token_balance(&svm, &updater_ata), reward_per_update * 2);
-
-        let (vault_pda, _) = reward_vault_pda(&oracle_pda);
-        let vault = deserialize_reward_vault(&svm, &vault_pda);
-        assert_eq!(vault.total_distributed, reward_per_update * 2);
-        assert_eq!(vault.total_updates_rewarded, 2);
     }
 
     // ── Resize buffer boundary tests ──

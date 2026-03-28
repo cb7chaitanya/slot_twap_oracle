@@ -54,7 +54,4 @@ pub mod slot_twap_oracle {
         instructions::fund_reward_vault::handler(ctx, amount)
     }
 
-    pub fn claim_reward(ctx: Context<ClaimReward>) -> Result<()> {
-        instructions::claim_reward::handler(ctx)
-    }
 }

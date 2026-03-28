@@ -103,7 +103,13 @@ pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
     ) {
         let reward_amount = reward_vault.reward_per_update;
 
+        // Pay only if:
+        // - there is a previous updater
+        // - this update hasn't already been rewarded (last_rewarded_slot check)
+        // - vault has sufficient balance
+        // - reward amount > 0
         if oracle.last_updater != Pubkey::default()
+            && oracle.last_slot != reward_vault.last_rewarded_slot
             && vault_token_account.amount >= reward_amount
             && reward_amount > 0
         {
@@ -133,6 +139,7 @@ pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
                 .ok_or(OracleError::PriceOverflow)?;
             vault.total_updates_rewarded = vault.total_updates_rewarded.checked_add(1)
                 .ok_or(OracleError::PriceOverflow)?;
+            vault.last_rewarded_slot = oracle.last_slot;
 
             emit!(RewardClaimed {
                 oracle: oracle.key(),

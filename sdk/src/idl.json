@@ -8,123 +8,6 @@
   },
   "instructions": [
     {
-      "name": "claim_reward",
-      "discriminator": [
-        149,
-        95,
-        181,
-        242,
-        94,
-        90,
-        158,
-        162
-      ],
-      "accounts": [
-        {
-          "name": "oracle",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  111,
-                  114,
-                  97,
-                  99,
-                  108,
-                  101
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "oracle.base_mint",
-                "account": "Oracle"
-              },
-              {
-                "kind": "account",
-                "path": "oracle.quote_mint",
-                "account": "Oracle"
-              }
-            ]
-          },
-          "relations": [
-            "reward_vault"
-          ]
-        },
-        {
-          "name": "reward_vault",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  119,
-                  97,
-                  114,
-                  100
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "oracle"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault_token_account",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  114,
-                  101,
-                  119,
-                  97,
-                  114,
-                  100,
-                  95,
-                  116,
-                  111,
-                  107,
-                  101,
-                  110,
-                  115
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "oracle"
-              }
-            ]
-          }
-        },
-        {
-          "name": "reward_mint"
-        },
-        {
-          "name": "updater_token_account",
-          "docs": [
-            "Updater's token account to receive the reward."
-          ],
-          "writable": true
-        },
-        {
-          "name": "updater",
-          "signer": true
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "fund_reward_vault",
       "discriminator": [
         9,
@@ -851,7 +734,8 @@
             ]
           },
           "relations": [
-            "observation_buffer"
+            "observation_buffer",
+            "reward_vault"
           ]
         },
         {
@@ -881,6 +765,77 @@
               }
             ]
           }
+        },
+        {
+          "name": "reward_vault",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  119,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "oracle"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  119,
+                  97,
+                  114,
+                  100,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "oracle"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reward_mint",
+          "optional": true
+        },
+        {
+          "name": "previous_updater_token_account",
+          "docs": [
+            "Token account of the *previous* updater to receive the reward."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "optional": true
         }
       ],
       "args": [
@@ -1322,6 +1277,13 @@
           },
           {
             "name": "total_updates_rewarded",
+            "type": "u64"
+          },
+          {
+            "name": "last_rewarded_slot",
+            "docs": [
+              "Slot of the last rewarded update — prevents double-pay."
+            ],
             "type": "u64"
           }
         ]
