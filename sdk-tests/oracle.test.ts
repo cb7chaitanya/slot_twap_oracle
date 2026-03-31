@@ -504,95 +504,51 @@ describe("Slot TWAP Oracle SDK", function () {
       expect(Number(vaultToken.amount)).to.equal(10_000_000);
     });
 
-    it("allows last_updater to claim reward", async () => {
-      // Update price so payer becomes last_updater
+    it("auto-rewards previous updater on next update", async () => {
+      // First update — payer becomes last_updater
       await waitForNextSlot(conn);
       await client.updatePrice(rewardOraclePda, new BN(1_000_000_000), payer);
 
-      const oracle = await client.fetchOracle(rewardOraclePda);
-      expect(oracle.lastUpdater.toBase58()).to.equal(payer.publicKey.toBase58());
+      // Create payer's reward token account
+      const payerRewardAta = await createTokenAccount(payer.publicKey, rewardMint);
 
-      // Create a separate token account for receiving reward
-      const claimAccount = await createTokenAccount(payer.publicKey, rewardMint);
-
-      const sig = await client.claimReward(
-        rewardOraclePda, rewardMint, claimAccount, payer
-      );
-      expect(sig).to.be.a("string");
-
-      // Verify reward received
-      const claimed = await getAccount(conn, claimAccount, "confirmed", TOKEN_2022_PROGRAM_ID);
-      expect(Number(claimed.amount)).to.equal(REWARD_PER_UPDATE.toNumber());
-
-      // Verify vault balance decreased
-      const [vaultTokenPda] = client.findVaultTokenAccountPda(rewardOraclePda);
-      const vaultToken = await getAccount(conn, vaultTokenPda, "confirmed", TOKEN_2022_PROGRAM_ID);
-      expect(Number(vaultToken.amount)).to.equal(10_000_000 - REWARD_PER_UPDATE.toNumber());
-    });
-
-    it("rejects claim from non-last-updater", async () => {
-      const attacker = Keypair.generate();
-      await airdrop(conn, attacker.publicKey, 2);
-      const attackerAta = await createTokenAccount(attacker.publicKey, rewardMint);
-
-      try {
-        await client.claimReward(
-          rewardOraclePda, rewardMint, attackerAta, attacker
-        );
-        expect.fail("Should have thrown Unauthorized");
-      } catch (err) {
-        expect((err as Error).message).to.include("Unauthorized");
-      }
-
-      const ata = await getAccount(conn, attackerAta, "confirmed", TOKEN_2022_PROGRAM_ID);
-      expect(Number(ata.amount)).to.equal(0);
-    });
-
-    it("different updater claims after new update", async () => {
+      // Second update by different signer — should auto-pay payer
       const updater2 = Keypair.generate();
       await airdrop(conn, updater2.publicKey, 2);
-      const updater2Ata = await createTokenAccount(updater2.publicKey, rewardMint);
-
-      // updater2 updates price
       await waitForNextSlot(conn);
-      await client.updatePrice(rewardOraclePda, new BN(1_050_000_000), updater2);
 
-      const oracle = await client.fetchOracle(rewardOraclePda);
-      expect(oracle.lastUpdater.toBase58()).to.equal(updater2.publicKey.toBase58());
+      // Use updatePriceWithReward to pass reward accounts
+      const [rewardVault] = client.findRewardVaultPda(rewardOraclePda);
+      const [vaultTokenAccount] = client.findVaultTokenAccountPda(rewardOraclePda);
+      const [obsBuf] = client.findObservationBufferPda(rewardOraclePda);
 
-      // updater2 claims
-      const sig = await client.claimReward(
-        rewardOraclePda, rewardMint, updater2Ata, updater2
-      );
-      expect(sig).to.be.a("string");
+      await client.program.methods
+        .updatePrice(new BN(1_050_000_000))
+        .accountsPartial({
+          payer: updater2.publicKey,
+          oracle: rewardOraclePda,
+          observationBuffer: obsBuf,
+          rewardVault,
+          vaultTokenAccount,
+          rewardMint,
+          previousUpdaterTokenAccount: payerRewardAta,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+        })
+        .signers([updater2])
+        .rpc();
 
-      const ata = await getAccount(conn, updater2Ata, "confirmed", TOKEN_2022_PROGRAM_ID);
+      // Verify payer received reward
+      const ata = await getAccount(conn, payerRewardAta, "confirmed", TOKEN_2022_PROGRAM_ID);
       expect(Number(ata.amount)).to.equal(REWARD_PER_UPDATE.toNumber());
     });
 
-    it("rejects claim when vault is empty", async () => {
-      // Create a fresh oracle with an empty vault
-      const emptyBase = await createMint(conn, payer);
-      const emptyQuote = await createMint(conn, payer);
-      await client.initializeOracle(emptyBase, emptyQuote, 4, payer);
-      const [emptyOracle] = client.findOraclePda(emptyBase, emptyQuote);
-
-      await client.initializeRewardVault(
-        emptyOracle, rewardMint, REWARD_PER_UPDATE, payer
-      );
-      // Don't fund it
-
+    it("update without reward accounts works (backwards compatible)", async () => {
       await waitForNextSlot(conn);
-      await client.updatePrice(emptyOracle, new BN(1_000_000_000), payer);
+      const sig = await client.updatePrice(rewardOraclePda, new BN(1_000_000_000), payer);
+      expect(sig).to.be.a("string");
 
-      const claimAta = await createTokenAccount(payer.publicKey, rewardMint);
-
-      try {
-        await client.claimReward(emptyOracle, rewardMint, claimAta, payer);
-        expect.fail("Should have thrown InsufficientRewardBalance");
-      } catch (err) {
-        expect((err as Error).message).to.include("InsufficientRewardBalance");
-      }
+      const oracle = await client.fetchOracle(rewardOraclePda);
+      expect(oracle.lastPrice.toNumber()).to.equal(1_000_000_000);
     });
   });
 });

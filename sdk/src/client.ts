@@ -78,11 +78,19 @@ export class SlotTwapOracleClient {
     newPrice: BN,
     payer: Signer
   ): Promise<string> {
+    const [obsBuf] = this.findObservationBufferPda(oracle);
+
     return this.program.methods
       .updatePrice(newPrice)
-      .accounts({
+      .accountsPartial({
         payer: payer.publicKey,
         oracle,
+        observationBuffer: obsBuf,
+        rewardVault: this.programId,
+        vaultTokenAccount: this.programId,
+        rewardMint: this.programId,
+        previousUpdaterTokenAccount: this.programId,
+        tokenProgram: this.programId,
       })
       .signers([payer])
       .rpc();
