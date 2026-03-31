@@ -39,6 +39,10 @@ pub fn handler(
     capacity: u32,
 ) -> Result<()> {
     require!(capacity > 0, OracleError::InvalidCapacity);
+    require!(
+        ctx.accounts.base_mint.key() != ctx.accounts.quote_mint.key(),
+        OracleError::InvalidCapacity // reuse error — same mint pair is invalid
+    );
 
     let oracle = &mut ctx.accounts.oracle;
     let clock = Clock::get()?;

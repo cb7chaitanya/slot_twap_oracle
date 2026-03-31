@@ -3176,4 +3176,88 @@ mod tests {
         assert_eq!(buffer.len, 3); // stays at capacity
         assert_eq!(buffer.head, 1); // wrapped
     }
+
+    // ── Audit fix tests ──
+
+    fn build_withdraw_reward_vault_ix(
+        oracle: &Pubkey,
+        reward_mint: &Pubkey,
+        owner: &Pubkey,
+        owner_token_account: &Pubkey,
+        amount: u64,
+    ) -> Instruction {
+        let (vault_pda, _) = reward_vault_pda(oracle);
+        let (vault_token, _) = vault_token_account_pda(oracle);
+        let data = slot_twap_oracle::instruction::WithdrawRewardVault { amount }.data();
+
+        Instruction {
+            program_id: program_id(),
+            accounts: vec![
+                AccountMeta::new_readonly(*oracle, false),
+                AccountMeta::new_readonly(vault_pda, false),
+                AccountMeta::new(vault_token, false),
+                AccountMeta::new_readonly(*reward_mint, false),
+                AccountMeta::new(*owner_token_account, false),
+                AccountMeta::new(*owner, true),
+                AccountMeta::new_readonly(spl_token_2022::id(), false),
+            ],
+            data,
+        }
+    }
+
+    #[test]
+    fn test_withdraw_reward_vault_by_owner() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let (oracle_pda, reward_mint, _, _) =
+            setup_reward_test(&mut svm, &owner, 1_000_000, 5_000_000);
+
+        let owner_ata = create_token_account(&mut svm, &owner, &reward_mint, &owner.pubkey());
+
+        // Owner withdraws 2M from vault
+        let ix = build_withdraw_reward_vault_ix(
+            &oracle_pda, &reward_mint, &owner.pubkey(), &owner_ata, 2_000_000,
+        );
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(&[ix], Some(&owner.pubkey()), &[&owner], blockhash);
+        svm.send_transaction(tx).unwrap();
+
+        assert_eq!(get_token_balance(&svm, &owner_ata), 2_000_000);
+        let (vault_token, _) = vault_token_account_pda(&oracle_pda);
+        assert_eq!(get_token_balance(&svm, &vault_token), 3_000_000);
+    }
+
+    #[test]
+    fn test_withdraw_reward_vault_non_owner_fails() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        let attacker = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&attacker.pubkey(), 10_000_000_000).unwrap();
+
+        let (oracle_pda, reward_mint, _, _) =
+            setup_reward_test(&mut svm, &owner, 1_000_000, 5_000_000);
+
+        let attacker_ata = create_token_account(&mut svm, &attacker, &reward_mint, &attacker.pubkey());
+
+        let ix = build_withdraw_reward_vault_ix(
+            &oracle_pda, &reward_mint, &attacker.pubkey(), &attacker_ata, 1_000_000,
+        );
+        send_tx_expect_err(&mut svm, &attacker, &[ix]);
+        assert_eq!(get_token_balance(&svm, &attacker_ata), 0);
+    }
+
+    #[test]
+    fn test_initialize_oracle_rejects_same_mints() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let mint = create_mint(&mut svm, &payer);
+        // base_mint == quote_mint should fail
+        let ix = build_initialize_ix(&payer.pubkey(), &mint, &mint, DEFAULT_CAPACITY);
+        send_tx_expect_err(&mut svm, &payer, &[ix]);
+    }
 }
