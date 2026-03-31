@@ -25,6 +25,7 @@ pub fn handler(ctx: Context<TransferOwnership>) -> Result<()> {
     let new_owner = ctx.accounts.new_owner.key();
 
     require!(new_owner != oracle.owner, OracleError::Unauthorized);
+    require!(new_owner != Pubkey::default(), OracleError::Unauthorized);
 
     let previous_owner = oracle.owner;
     oracle.owner = new_owner;
