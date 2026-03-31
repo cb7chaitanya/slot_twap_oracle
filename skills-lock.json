@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "safe-solana-builder": {
+      "source": "frankcastleauditor/safe-solana-builder",
+      "sourceType": "github",
+      "computedHash": "e768efdb1f091b088be12ca4e5ba18b34fbdcb645a2e82d2ea4704101c45904c"
+    },
+    "solana-vulnerability-scanner": {
+      "source": "trailofbits/skills",
+      "sourceType": "github",
+      "computedHash": "5eacb1f80b8c30627e6cb6bbb543e7d47104ebed1da33a5cb8f8dbee336fcc86"
+    }
+  }
+}
