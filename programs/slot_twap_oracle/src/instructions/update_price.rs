@@ -133,6 +133,9 @@ pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
                 reward_mint.decimals,
             )?;
 
+            // Reload vault token account after CPI to avoid stale balance reads (§5)
+            ctx.accounts.vault_token_account.as_mut().unwrap().reload()?;
+
             // Update accounting
             let vault = ctx.accounts.reward_vault.as_mut().unwrap();
             vault.total_distributed = vault.total_distributed.checked_add(reward_amount)
