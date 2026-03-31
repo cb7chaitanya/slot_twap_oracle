@@ -1874,7 +1874,6 @@ mod tests {
         new_owner: &Pubkey,
     ) -> Instruction {
         let data = slot_twap_oracle::instruction::TransferOwnership.data();
-
         Instruction {
             program_id: program_id(),
             accounts: vec![
@@ -1886,36 +1885,84 @@ mod tests {
         }
     }
 
+    fn build_accept_ownership_ix(
+        oracle: &Pubkey,
+        new_owner: &Pubkey,
+    ) -> Instruction {
+        let data = slot_twap_oracle::instruction::AcceptOwnership.data();
+        Instruction {
+            program_id: program_id(),
+            accounts: vec![
+                AccountMeta::new(*oracle, false),
+                AccountMeta::new_readonly(*new_owner, true),
+            ],
+            data,
+        }
+    }
+
     #[test]
-    fn test_transfer_ownership_success() {
+    fn test_two_step_ownership_transfer() {
         let mut svm = setup();
         let owner = Keypair::new();
         let new_owner = Keypair::new();
         svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&new_owner.pubkey(), 10_000_000_000).unwrap();
 
         let base_mint = create_mint(&mut svm, &owner);
         let quote_mint = create_mint(&mut svm, &owner);
         let (oracle_pda, _) =
             init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        // Owner is the initializer
-        let oracle = deserialize_oracle(&svm, &oracle_pda);
-        assert_eq!(oracle.owner, owner.pubkey());
-
-        // Transfer ownership
+        // Step 1: Owner proposes new owner
         let ix = build_transfer_ownership_ix(&oracle_pda, &owner.pubkey(), &new_owner.pubkey());
         let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&owner.pubkey()),
-            &[&owner],
-            blockhash,
-        );
+        let tx = Transaction::new_signed_with_payer(&[ix], Some(&owner.pubkey()), &[&owner], blockhash);
         svm.send_transaction(tx).unwrap();
 
-        // Verify new owner
+        // Owner unchanged, pending_owner set
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.owner, owner.pubkey());
+        assert_eq!(oracle.pending_owner, new_owner.pubkey());
+
+        // Step 2: New owner accepts
+        let ix = build_accept_ownership_ix(&oracle_pda, &new_owner.pubkey());
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(&[ix], Some(&new_owner.pubkey()), &[&new_owner], blockhash);
+        svm.send_transaction(tx).unwrap();
+
+        // Owner transferred, pending cleared
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         assert_eq!(oracle.owner, new_owner.pubkey());
+        assert_eq!(oracle.pending_owner, Pubkey::default());
+    }
+
+    #[test]
+    fn test_accept_ownership_wrong_signer_fails() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        let new_owner = Keypair::new();
+        let attacker = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&attacker.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, _) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Propose new_owner
+        let ix = build_transfer_ownership_ix(&oracle_pda, &owner.pubkey(), &new_owner.pubkey());
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(&[ix], Some(&owner.pubkey()), &[&owner], blockhash);
+        svm.send_transaction(tx).unwrap();
+
+        // Attacker tries to accept — should fail
+        let ix = build_accept_ownership_ix(&oracle_pda, &attacker.pubkey());
+        send_tx_expect_err(&mut svm, &attacker, &[ix]);
+
+        // Owner unchanged
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.owner, owner.pubkey());
     }
 
     #[test]
@@ -1932,19 +1979,9 @@ mod tests {
         let (oracle_pda, _) =
             init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        // Non-owner tries to transfer — should fail
         let ix = build_transfer_ownership_ix(&oracle_pda, &attacker.pubkey(), &new_owner.pubkey());
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&attacker.pubkey()),
-            &[&attacker],
-            blockhash,
-        );
-        let result = svm.send_transaction(tx);
-        assert!(result.is_err(), "Non-owner should not be able to transfer ownership");
+        send_tx_expect_err(&mut svm, &attacker, &[ix]);
 
-        // Owner unchanged
         let oracle = deserialize_oracle(&svm, &oracle_pda);
         assert_eq!(oracle.owner, owner.pubkey());
     }
@@ -1960,17 +1997,8 @@ mod tests {
         let (oracle_pda, _) =
             init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
 
-        // Transfer to self — should fail
         let ix = build_transfer_ownership_ix(&oracle_pda, &owner.pubkey(), &owner.pubkey());
-        let blockhash = svm.latest_blockhash();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&owner.pubkey()),
-            &[&owner],
-            blockhash,
-        );
-        let result = svm.send_transaction(tx);
-        assert_anchor_error(&result, OracleError::Unauthorized);
+        send_tx_expect_err(&mut svm, &owner, &[ix]);
     }
 
     // ── Pause/unpause tests ──

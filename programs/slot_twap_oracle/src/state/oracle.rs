@@ -12,4 +12,5 @@ pub struct Oracle {
     pub last_updater: Pubkey,
     pub paused: bool,
     pub max_deviation_bps: u16,
+    pub pending_owner: Pubkey,
 }
