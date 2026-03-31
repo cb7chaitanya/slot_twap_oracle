@@ -114,8 +114,7 @@ pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
             && reward_amount > 0
         {
             let oracle_key = oracle.key();
-            let seeds: &[&[u8]] = &[b"reward", oracle_key.as_ref()];
-            let (_, bump) = Pubkey::find_program_address(seeds, ctx.program_id);
+            let bump = reward_vault.bump;
             let signer_seeds: &[&[&[u8]]] = &[&[b"reward", oracle_key.as_ref(), &[bump]]];
 
             token_interface::transfer_checked(

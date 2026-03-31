@@ -45,8 +45,7 @@ pub struct WithdrawRewardVault<'info> {
 
 pub fn handler(ctx: Context<WithdrawRewardVault>, amount: u64) -> Result<()> {
     let oracle_key = ctx.accounts.oracle.key();
-    let seeds: &[&[u8]] = &[b"reward", oracle_key.as_ref()];
-    let (_, bump) = Pubkey::find_program_address(seeds, ctx.program_id);
+    let bump = ctx.accounts.reward_vault.bump;
     let signer_seeds: &[&[&[u8]]] = &[&[b"reward", oracle_key.as_ref(), &[bump]]];
 
     token_interface::transfer_checked(

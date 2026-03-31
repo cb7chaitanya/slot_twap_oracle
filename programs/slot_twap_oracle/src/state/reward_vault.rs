@@ -12,4 +12,6 @@ pub struct RewardVault {
     pub total_updates_rewarded: u64,
     /// Slot of the last rewarded update — prevents double-pay.
     pub last_rewarded_slot: u64,
+    /// Cached PDA bump for efficient CPI signing.
+    pub bump: u8,
 }

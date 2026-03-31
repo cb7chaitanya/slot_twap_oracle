@@ -61,6 +61,7 @@ pub fn handler(ctx: Context<InitializeRewardVault>, reward_per_update: u64) -> R
     vault.reward_per_update = reward_per_update;
     vault.total_distributed = 0;
     vault.total_updates_rewarded = 0;
+    vault.bump = ctx.bumps.reward_vault;
 
     Ok(())
 }
